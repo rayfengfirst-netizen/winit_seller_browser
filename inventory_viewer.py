@@ -11,11 +11,11 @@
 环境变量：
   WINIT_SQLITE_PATH   同 run_daily_winit_job
   WINIT_VIEWER_HOST   默认 127.0.0.1（需公网访问时可设 0.0.0.0，务必配下面账号密码）
-  WINIT_VIEWER_PORT   默认 8765
+  WINIT_VIEWER_PORT   默认 8765（服务器上常用 8765 作为库存首页；飞书详情链接请设 WINIT_PUBLIC_BASE_URL 同端口）
   WINIT_VIEWER_USER / WINIT_VIEWER_PASSWORD  若均非空，则整站 HTTP Basic 认证
 
 报表：
-  /report/no-sales  无动销预警（规则见 winit_no_sales_report.py）
+  /report/no-sales  无动销预警（可用≠0、7日均库>0；表内为五项统计口径全满足，见 winit_no_sales_report.py）
 """
 
 from __future__ import annotations
@@ -27,13 +27,18 @@ import os
 import sqlite3
 from pathlib import Path
 
+from collections import defaultdict
+
 from dotenv import load_dotenv
 from flask import Flask, abort, request, Response
 
 ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env")
 
+from winit_accounts import account_display_for_row, account_id_display_map  # noqa: E402
 from winit_inventory_db import connect, init_schema, sqlite_path  # noqa: E402
+from winit_view_format import cell_int_str  # noqa: E402
+from winit_view_theme import VIEWER_THEME_CSS  # noqa: E402
 from winit_no_sales_report import (  # noqa: E402
     collect_no_sales_rows,
     render_no_sales_report_html,
@@ -76,6 +81,7 @@ def _conn() -> sqlite3.Connection:
 @app.route("/")
 def index() -> str:
     db = html.escape(str(sqlite_path()))
+    id_map = account_id_display_map()
     with _conn() as conn:
         cur = conn.execute(
             """
@@ -90,15 +96,42 @@ def index() -> str:
         )
         blocks = cur.fetchall()
 
-    rows_html = ""
+    by_acct: defaultdict[int, list] = defaultdict(list)
     for snapshot_date, account_id, username, n in blocks:
-        u = html.escape(username or "")
-        rows_html += (
-            f"<tr><td>{html.escape(snapshot_date)}</td>"
-            f"<td>{account_id}</td><td>{u}</td><td>{n}</td>"
-            f"<td><a href=\"/table?snapshot_date={html.escape(snapshot_date, quote=True)}"
-            f"&account_id={account_id}\">浏览</a></td></tr>"
+        by_acct[int(account_id)].append((snapshot_date, account_id, username, n))
+
+    sections_html = ""
+    for aid in sorted(by_acct.keys()):
+        acct_rows = by_acct[aid]
+        acct_rows.sort(key=lambda r: r[0], reverse=True)
+        uname = (acct_rows[0][2] or "") if acct_rows else ""
+        tag = html.escape(account_display_for_row(aid, uname, id_map=id_map))
+        inner = ""
+        for snapshot_date, account_id, username, n in acct_rows:
+            u = html.escape(username or "")
+            inner += (
+                f"<tr><td>{html.escape(snapshot_date)}</td>"
+                f"<td>{account_id}</td><td>{u}</td>"
+                f"<td class=\"num\">{cell_int_str(n)}</td>"
+                f"<td><a href=\"/table?snapshot_date={html.escape(snapshot_date, quote=True)}"
+                f"&account_id={account_id}\">浏览</a></td></tr>"
+            )
+        sections_html += (
+            f"<section class=\"card acct-home\">"
+            f"<h2>账号 {tag}</h2>"
+            "<table class=\"data\">"
+            "<thead><tr><th>快照日期</th><th>账号 ID</th><th>登录名</th>"
+            "<th class=\"num\">行数</th><th></th></tr></thead>"
+            f"<tbody>{inner}</tbody></table></section>"
         )
+
+    empty_msg = (
+        "<section class=\"card acct-home\"><p><strong>暂无快照数据。</strong><br/>"
+        "在本机项目目录执行：<code>python run_daily_winit_job.py</code>（有 zip 可先 "
+        "<code>WINIT_SKIP_DOWNLOAD=1 python run_daily_winit_job.py</code>）。<br/>"
+        "若曾把数据写入其它库，请在 <code>.env</code> 里设置 <code>WINIT_SQLITE_PATH</code> "
+        "与这里一致后重启本页服务。</p></section>"
+    )
 
     return f"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -106,31 +139,22 @@ def index() -> str:
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Winit 库存快照</title>
-  <style>
-    body {{ font-family: system-ui, sans-serif; margin: 1rem; max-width: 1200px; }}
-    table {{ border-collapse: collapse; width: 100%; font-size: 14px; }}
-    th, td {{ border: 1px solid #ccc; padding: 6px 8px; text-align: left; }}
-    th {{ background: #f4f4f4; }}
-    .muted {{ color: #666; font-size: 13px; }}
-    a {{ color: #0b57d0; }}
-  </style>
+  <style>{VIEWER_THEME_CSS}</style>
 </head>
 <body>
-  <h1>Winit 库存快照</h1>
-  <p class="muted">数据库文件：<code>{db}</code></p>
-  <p><a href="/report/no-sales">无动销预警（按规则筛选）→</a></p>
-  <h2>按日期 · 账号汇总</h2>
-  <table>
-    <thead><tr><th>快照日期</th><th>账号 ID</th><th>登录名</th><th>行数</th><th></th></tr></thead>
-    <tbody>{rows_html or (
-        "<tr><td colspan=5><strong>暂无快照数据。</strong><br/>"
-        "在本机项目目录执行：<code>python run_daily_winit_job.py</code>（有 zip 可先 "
-        "<code>WINIT_SKIP_DOWNLOAD=1 python run_daily_winit_job.py</code>）。<br/>"
-        "若曾把数据写入其它库，请在 <code>.env</code> 里设置 <code>WINIT_SQLITE_PATH</code> 与这里一致后重启本页服务。"
-        "</td></tr>"
-    )}</tbody>
-  </table>
-  <p><a href="/runs">同步运行记录 sync_runs →</a></p>
+<div class="page">
+  <header class="banner">
+    <h1>Winit 库存快照</h1>
+    <p class="sub">按账号分块；库存明细中数量以整数展示，并按可用库存从高到低排序</p>
+  </header>
+  <div class="toolbar">
+    <a href="/report/no-sales" class="primary">无动销预警</a>
+    <a href="/runs">同步运行记录</a>
+  </div>
+  <p class="muted">数据库文件 <code>{db}</code></p>
+  <h2 class="section-title">按账号 · 快照汇总</h2>
+  {sections_html if sections_html else empty_msg}
+</div>
 </body>
 </html>"""
 
@@ -148,7 +172,17 @@ def table() -> str:
         abort(400, "account_id 无效")
 
     offset = (page - 1) * PAGE_SIZE
+    id_map = account_id_display_map()
     with _conn() as conn:
+        uname_row = conn.execute(
+            """
+            SELECT MAX(account_username) FROM inventory_daily
+            WHERE snapshot_date = ? AND account_id = ?
+            """,
+            (snapshot_date, account_id),
+        ).fetchone()
+        uname = (uname_row[0] or "") if uname_row else ""
+        acct_tag = account_display_for_row(account_id, uname, id_map=id_map)
         total = conn.execute(
             """
             SELECT COUNT(*) FROM inventory_daily
@@ -162,7 +196,7 @@ def table() -> str:
                    qty_available, qty_on_hand, row_json
             FROM inventory_daily
             WHERE snapshot_date = ? AND account_id = ?
-            ORDER BY warehouse, sku
+            ORDER BY (qty_available IS NULL), qty_available DESC, warehouse, sku
             LIMIT ? OFFSET ?
             """,
             (snapshot_date, account_id, PAGE_SIZE, offset),
@@ -177,49 +211,54 @@ def table() -> str:
             f"<td>{html.escape(str(wh or ''))}</td>"
             f"<td>{html.escape(str(sku or ''))}</td>"
             f"<td>{html.escape(str(nzh or '')[:80])}</td>"
-            f"<td>{qav}</td><td>{qoh}</td>"
+            f"<td class=\"num\">{html.escape(cell_int_str(qav))}</td>"
+            f"<td class=\"num\">{html.escape(cell_int_str(qoh))}</td>"
             f"<td><details><summary>row_json</summary><pre>{j}</pre></details></td></tr>"
         )
 
     prev_q = f"snapshot_date={html.escape(snapshot_date, quote=True)}&account_id={account_id}&page={page - 1}"
     next_q = f"snapshot_date={html.escape(snapshot_date, quote=True)}&account_id={account_id}&page={page + 1}"
-    nav = f'<p class="muted">共 {total} 行，第 {page} 页 '
+    nav = f'<p class="muted">共 {cell_int_str(total)} 行，第 {cell_int_str(page)} 页 '
     if page > 1:
         nav += f'<a href="/table?{prev_q}">上一页</a> '
     if offset + len(data) < total:
         nav += f'<a href="/table?{next_q}">下一页</a>'
     nav += "</p>"
 
-    title = f"{snapshot_date} · 账号 {account_id}"
+    title = f"{snapshot_date} · {acct_tag}"
     return f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>{html.escape(title)}</title>
-  <style>
-    body {{ font-family: system-ui, sans-serif; margin: 1rem; }}
-    table {{ border-collapse: collapse; width: 100%; font-size: 13px; }}
-    th, td {{ border: 1px solid #ccc; padding: 5px 6px; text-align: left; vertical-align: top; }}
-    th {{ background: #f4f4f4; }}
-    pre {{ white-space: pre-wrap; word-break: break-all; font-size: 11px; max-height: 240px; overflow: auto; }}
-    .muted {{ color: #666; }}
-    a {{ color: #0b57d0; }}
+  <style>{VIEWER_THEME_CSS}
+    pre {{ white-space: pre-wrap; word-break: break-all; font-size: 11px; max-height: 240px; overflow: auto; background: #f8fafc; padding: 0.5rem; border-radius: 6px; }}
   </style>
 </head>
 <body>
-  <p><a href="/">← 返回汇总</a></p>
-  <h1>{html.escape(title)}</h1>
+<div class="page">
+  <div class="toolbar" style="margin-bottom:0.75rem">
+    <a href="/">← 返回汇总</a>
+  </div>
+  <header class="banner" style="padding:1rem 1.25rem">
+    <h1 style="font-size:1.2rem">{html.escape(title)}</h1>
+    <p class="sub">可用 / 在库数量为整数；本页按可用库存从高到低排序</p>
+  </header>
   {nav}
-  <table>
+  <section class="card" style="padding:0.75rem 1rem 1rem">
+  <table class="data">
     <thead>
       <tr>
-        <th>国家</th><th>仓库</th><th>SKU</th><th>中文名</th><th>可用</th><th>在库</th><th>全字段 JSON</th>
+        <th>国家</th><th>仓库</th><th>SKU</th><th>中文名</th>
+        <th class="num">可用</th><th class="num">在库</th><th>全字段 JSON</th>
       </tr>
     </thead>
     <tbody>{rows_html}</tbody>
   </table>
+  </section>
   {nav}
+</div>
 </body>
 </html>"""
 
@@ -247,8 +286,9 @@ def runs() -> str:
         st_e = html.escape(st or "")
         d_e = html.escape(dprev or "")
         body += (
-            f"<tr><td>{rid}</td><td>{html.escape(sd)}</td><td>{aid}</td><td>{user_e}</td>"
-            f"<td>{rc}</td><td>{st_e}</td><td class=\"muted\">{zp_e}</td>"
+            f"<tr><td class=\"num\">{cell_int_str(rid)}</td><td>{html.escape(sd)}</td>"
+            f"<td class=\"num\">{cell_int_str(aid)}</td><td>{user_e}</td>"
+            f"<td class=\"num\">{cell_int_str(rc)}</td><td>{st_e}</td><td class=\"muted\">{zp_e}</td>"
             f"<td><small>{d_e}</small></td><td><small>{html.escape(sta or '')}</small></td>"
             f"<td><small>{html.escape(fin or '')}</small></td>"
             f"<td><a href=\"/runs/{rid}\">详情</a></td></tr>"
@@ -258,28 +298,33 @@ def runs() -> str:
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8"/>
-  <title>sync_runs</title>
-  <style>
-    body {{ font-family: system-ui, sans-serif; margin: 1rem; }}
-    table {{ border-collapse: collapse; width: 100%; font-size: 13px; }}
-    th, td {{ border: 1px solid #ccc; padding: 6px; text-align: left; }}
-    th {{ background: #f4f4f4; }}
-    .muted {{ color: #555; word-break: break-all; }}
-    a {{ color: #0b57d0; }}
+  <title>同步运行记录</title>
+  <style>{VIEWER_THEME_CSS}
+    .muted {{ word-break: break-all; }}
   </style>
 </head>
 <body>
-  <p><a href="/">← 返回汇总</a></p>
-  <h1>同步运行记录（最近 100 条）</h1>
-  <table>
+<div class="page">
+  <div class="toolbar" style="margin-bottom:0.75rem">
+    <a href="/">← 返回汇总</a>
+  </div>
+  <header class="banner" style="padding:1rem 1.25rem">
+    <h1 style="font-size:1.2rem">同步运行记录</h1>
+    <p class="sub">最近 100 条 · 行数为整数</p>
+  </header>
+  <section class="card" style="padding:0.75rem 1rem 1rem">
+  <table class="data">
     <thead>
       <tr>
-        <th>id</th><th>日期</th><th>账号</th><th>用户</th><th>行数</th><th>状态</th>
+        <th class="num">id</th><th>日期</th><th class="num">账号</th><th>用户</th>
+        <th class="num">行数</th><th>状态</th>
         <th>zip</th><th>摘要</th><th>开始</th><th>结束</th><th></th>
       </tr>
     </thead>
     <tbody>{body or "<tr><td colspan=11>暂无记录</td></tr>"}</tbody>
   </table>
+  </section>
+</div>
 </body>
 </html>"""
 

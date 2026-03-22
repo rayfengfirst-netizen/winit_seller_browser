@@ -1,4 +1,7 @@
-# 每日 09:00 无动销预警 → 飞书（需 .env：WINIT_FEISHU_WEBHOOK_URL、WINIT_PUBLIC_BASE_URL）
+# 无动销定时任务：读 SQLite 最新快照 → 按规则统计 → 飞书「no_sales」Webhook
+# 默认定时见 winit-no-sales-alert.timer.example：本地 10:00 + 时区 Asia/Shanghai = 北京时间 10:00
+# 依赖：当日数据已由 winit-daily-sync（或手动 run_daily）入库后再跑本任务
+# .env：WINIT_FEISHU_WEBHOOK_NO_SALES、WINIT_PUBLIC_BASE_URL
 #
 # sudo cp deploy/winit-no-sales-alert.service.example /etc/systemd/system/winit-no-sales-alert.service
 # sudo cp deploy/winit-no-sales-alert.timer.example /etc/systemd/system/winit-no-sales-alert.timer

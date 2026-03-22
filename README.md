@@ -23,19 +23,36 @@
 - **`step03_unpack_winit_export.py`** — **第三步**：解压导出 zip → 预览 xlsx 表头与样例行 → 可选 `--export-csv`（依赖 `openpyxl`）
 - **`run_daily_winit_job.py`** — **定时主线**：按顺序对每个已配置账号执行 step02 下载 → 解压 → 写入 **SQLite 日快照**（`artifacts/winit_inventory.db`，路径可用 `WINIT_SQLITE_PATH` 覆盖）
 - `winit_inventory_db.py` / `winit_inventory_ingest.py` — 表结构 `inventory_daily`（按 `snapshot_date` + `account_id` 整批替换）与 `sync_runs` 运行记录
-- `deploy/winit-daily-sync.service.example` + `winit-daily-sync.timer.example` — systemd **每天 06:00（服务器本地时区）**触发；完成后可通过 `WINIT_FEISHU_WEBHOOK_URL` 发飞书文本摘要
-- **`inventory_viewer.py`** — 只读网页浏览 SQLite（表格化界面，可扩展为后续业务页的基础）
+- `deploy/winit-daily-sync.service.example` + `winit-daily-sync.timer.example` — systemd **每天本地 06:00** 触发；**请将服务器时区设为 `Asia/Shanghai`** 即北京时间早 6 点入库（见 timer 文件头注释）；完成后飞书「sync」场景通知（`WINIT_FEISHU_WEBHOOK_SYNC` 或兼容 `WINIT_FEISHU_WEBHOOK_URL`，见 `winit_feishu_webhook.py`）
+- **`inventory_viewer.py`** — 只读网页浏览 SQLite（表格化界面；**服务器上通常用 8765 作库存首页**，与 `WINIT_PUBLIC_BASE_URL` 端口对齐）
   - 无域名：在 `.env` 设 `WINIT_VIEWER_HOST=0.0.0.0`、`WINIT_VIEWER_USER` / `WINIT_VIEWER_PASSWORD` 后访问 `http://公网IP:8765/`（安全组只放行你的 IP）
   - 常驻：`deploy/inventory-viewer.service.example` → `systemctl enable --now inventory-viewer`
 - **`scripts/run_full_inventory_sync.sh`** — 一键：两账号（或全部已配置账号）依次 **下载 zip → 解压 → 入库**（内部调用 `run_daily_winit_job.py`）
-- **`run_no_sales_morning_job.py`** — **无动销预警**：读最新快照，飞书推送摘要 + 详情链接；详情页为 `inventory_viewer` 的 `/report/no-sales`
-- `deploy/winit-no-sales-alert.service.example` + `.timer.example` — 默认每天 **09:00** 发飞书（与 06:00 入库 timer 独立）
+- **`run_no_sales_morning_job.py`** — **无动销预警（定时任务）**：规则与排期见下文 **「无动销预警」**；飞书走 `WINIT_FEISHU_WEBHOOK_NO_SALES`
+- `deploy/winit-no-sales-alert.service.example` + `.timer.example` — 默认每天 **本地 10:00** 发飞书（时区 `Asia/Shanghai` 即北京时间 10:00，与 06:00 入库独立）
+
+### 无动销预警（规则与定时）
+
+- **定位**：定时任务；读 SQLite 里每个账号的**最新快照日**数据，算完后发飞书，并给出只读详情页链接。
+- **基础条件**（同时满足才计入后面的「均销为 0」统计）：
+  - 可用库存 **≠ 0**
+  - **7 天平均库存 > 0**（导出表字段一般为「7天平均库存」）
+- **飞书正文**：**按账号**输出；在基础条件下，分别统计 **7 / 15 / 30 天平均日销量为 0** 的 SKU **条数**，并单独报 **五项全满足**（基础两条 + 三种均销均为 0）的 SKU 条数。缺失的销量字段按 0 处理（与实现一致）。
+- **详情页**：`inventory_viewer` 的 `/report/no-sales`，只列 **五项全满足** 的 SKU（分账号、数量在页面上以整数展示）。
+- **排期**：**北京时间每天 10:00**（timer 为本地 10:00 + 系统时区 `Asia/Shanghai`）。宜在 **当日北京时间 06:00 入库完成之后**，保证用的是刚更新的快照。
+
+### 其它脚本与配置
+
+- `winit_feishu_webhook.py` — 多场景飞书 Webhook（`feishu_send_text(..., channel="sync"|"no_sales"|…)`）
+- `winit_view_theme.py` / `winit_view_format.py` — 只读页共用样式与表格整数格式
+- `test_no_sales_feishu.py` — 预览/试发无动销飞书
 - `download_winit.py` — 登录后按流程下载（等你把「模拟操作」脚本发给我再接）
 - `winit_download_flow.py` — 流程步骤解析
 - `download_flow.example.json` — 流程示例（复制为 `download_flow.json` 后自行修改）
 - `requirements.txt`
 - `deploy/` — systemd / 定时任务示例
 - `DEPLOY_WITH_MYAPP.md` — **与现有 myapp 同机部署的逐步说明**
+- **`OPERATIONS.md`** — **需求与代码对照、Git 发布与线上测试清单**
 
 ## 本地运行
 
@@ -51,7 +68,8 @@ python login_winit.py
 ## 线上部署
 
 - **从 GitHub 拉到服务器（一步步）：** [SERVER_QUICKSTART.md](./SERVER_QUICKSTART.md)  
-- **与 myapp 同机、互不干扰：** [DEPLOY_WITH_MYAPP.md](./DEPLOY_WITH_MYAPP.md)
+- **与 myapp 同机、互不干扰：** [DEPLOY_WITH_MYAPP.md](./DEPLOY_WITH_MYAPP.md)  
+- **发布前回顾、`.env`、systemd、飞书、线上验证：** [OPERATIONS.md](./OPERATIONS.md)
 
 ## v0（连通 + 推送 + 服务器跑通）
 

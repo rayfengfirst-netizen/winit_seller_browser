@@ -75,6 +75,8 @@ chmod 600 .env
 WINIT_HEADLESS=true
 ```
 
+入库/飞书/只读站/无动销所需的 **完整变量说明** 见 **[OPERATIONS.md](./OPERATIONS.md)** §3 与 [`.env.example`](./.env.example)。
+
 ---
 
 ## 5. 验证能否跑通
@@ -109,4 +111,4 @@ pip install -r requirements.txt
 
 ---
 
-更多：与 myapp 同机隔离说明见 [DEPLOY_WITH_MYAPP.md](./DEPLOY_WITH_MYAPP.md)。
+更多：与 myapp 同机隔离见 [DEPLOY_WITH_MYAPP.md](./DEPLOY_WITH_MYAPP.md)；**发布与线上测试清单**见 [OPERATIONS.md](./OPERATIONS.md)。

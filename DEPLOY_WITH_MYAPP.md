@@ -129,3 +129,17 @@ curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/
 ```
 
 上述与部署 winit **前** 行为一致即表示 myapp 未受影响。
+
+---
+
+## 8. 库存日报、只读站点、无动销（当前主线）
+
+与 §3 里示例性的 `winit-analytics.timer` **并列**：实际生产更常用下面三个单元（示例在 `deploy/`）：
+
+| 单元 | 作用 |
+|------|------|
+| `winit-daily-sync.service` + `.timer` | 每天 **本地 06:00**（服务器时区设为 `Asia/Shanghai` 即北京时间 6 点）跑 `run_daily_winit_job.py` |
+| `inventory-viewer.service` | 常驻 `inventory_viewer.py`，默认 **8765** 作库存首页 |
+| `winit-no-sales-alert.service` + `.timer` | 每天 **本地 10:00**（同上时区即北京 10 点）跑 `run_no_sales_morning_job.py` |
+
+飞书分场景 Webhook、`.env` 必填项、上线验证步骤见 **[OPERATIONS.md](./OPERATIONS.md)**。

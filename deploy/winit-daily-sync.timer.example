@@ -1,9 +1,14 @@
-# 与 winit-daily-sync.service 配套；每天 06:00（systemd 使用服务器本地时区）
-# 若主机为 UTC 而业务要北京时间 06:00，请改为 OnCalendar=*-*-* 22:00:00 UTC
-# 或执行：sudo timedatectl set-timezone Asia/Shanghai
+# 中国时间（北京时间）每天 06:00 执行库存导出 + 入库。
+#
+# OnCalendar 使用「主机本地时区」。要得到北京时间 06:00，请先执行：
+#   sudo timedatectl set-timezone Asia/Shanghai
+#   timedatectl   # 确认 Time zone: Asia/Shanghai (CST, +0800)
+#
+# 说明：部分旧版 systemd 不支持 OnCalendar 末尾写 Asia/Shanghai，故示例只用本地 06:00，
+# 由系统时区保证等于北京时间。
 
 [Unit]
-Description=Timer for winit-daily-sync.service
+Description=Timer for winit-daily-sync.service (06:00 local = Beijing if TZ is Asia/Shanghai)
 
 [Timer]
 OnCalendar=*-*-* 06:00:00

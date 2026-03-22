@@ -19,7 +19,7 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from dotenv import load_dotenv
 
@@ -83,6 +83,25 @@ def list_winit_accounts() -> List[WinitAccount]:
         n += 1
 
     return out
+
+
+def account_id_display_map() -> Dict[int, str]:
+    """账号 id → 展示短名（如 1（主店）），与 SQLite inventory_daily.account_id 对齐。"""
+    return {a.id: a.display_name() for a in list_winit_accounts()}
+
+
+def account_display_for_row(
+    account_id: int,
+    account_username: str = "",
+    *,
+    id_map: Optional[Dict[int, str]] = None,
+) -> str:
+    """有 .env 标识用标识；否则回退为 id（登录名）。"""
+    m = id_map if id_map is not None else account_id_display_map()
+    if account_id in m:
+        return m[account_id]
+    u = (account_username or "").strip()
+    return f"{account_id}（{u}）" if u else str(account_id)
 
 
 def pick_active_account(accs: Optional[List[WinitAccount]] = None) -> Optional[WinitAccount]:

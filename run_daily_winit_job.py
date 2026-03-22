@@ -10,8 +10,8 @@
   cd winit_seller_browser && source .venv/bin/activate
   python run_daily_winit_job.py
 
-服务器上与 systemd timer 配合：见 deploy/winit-daily-sync.timer.example（默认每天 06:00 服务器本地时区）。
-完成后若设置 WINIT_FEISHU_WEBHOOK_URL，会向飞书群发送文本摘要。
+服务器上与 systemd timer 配合：见 deploy/winit-daily-sync.timer.example（每天本地 06:00；设时区 Asia/Shanghai 即北京时间 6 点）。
+完成后若配置飞书「sync」场景 Webhook（见 winit_feishu_webhook.py），会向飞书发送文本摘要。
 """
 
 from __future__ import annotations
@@ -158,7 +158,10 @@ def main() -> int:
     accs = list_winit_accounts()
     if not accs:
         print("未配置任何 Winit 账号（.env）", file=sys.stderr)
-        feishu_send_text("❌ 万邑通库存同步失败：未配置任何账号（.env）")
+        feishu_send_text(
+            "❌ 万邑通库存同步失败：未配置任何账号（.env）",
+            channel="sync",
+        )
         return 1
 
     snapshot_date = _snapshot_date_str()
@@ -201,8 +204,11 @@ def main() -> int:
     )
     summary = "\n".join(lines)
 
-    ok, detail = feishu_send_text(summary)
-    print(f"[daily] 飞书通知：{'成功' if ok else '失败'} ({detail})", flush=True)
+    ok, detail = feishu_send_text(summary, channel="sync")
+    print(
+        f"[daily] 飞书(sync)：{'成功' if ok else '失败'} ({detail})",
+        flush=True,
+    )
     if not ok:
         print(summary, file=sys.stderr)
 
