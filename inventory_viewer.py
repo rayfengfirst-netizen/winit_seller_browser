@@ -10,12 +10,14 @@
 
 环境变量：
   WINIT_SQLITE_PATH   同 run_daily_winit_job
-  WINIT_VIEWER_HOST   默认 127.0.0.1
+  WINIT_VIEWER_HOST   默认 127.0.0.1（需公网访问时可设 0.0.0.0，务必配下面账号密码）
   WINIT_VIEWER_PORT   默认 8765
+  WINIT_VIEWER_USER / WINIT_VIEWER_PASSWORD  若均非空，则整站 HTTP Basic 认证
 """
 
 from __future__ import annotations
 
+import hmac
 import html
 import json
 import os
@@ -32,7 +34,30 @@ from winit_inventory_db import connect, init_schema, sqlite_path  # noqa: E402
 
 app = Flask(__name__)
 
+_VIEWER_USER = os.environ.get("WINIT_VIEWER_USER", "").strip()
+_VIEWER_PASSWORD = os.environ.get("WINIT_VIEWER_PASSWORD", "")
+
 PAGE_SIZE = 80
+
+
+@app.before_request
+def _require_basic_auth_if_configured() -> Response | None:
+    if not _VIEWER_USER:
+        return None
+    auth = request.authorization
+    ok_user = auth is not None and auth.username == _VIEWER_USER
+    ok_pass = auth is not None and hmac.compare_digest(
+        auth.password or "",
+        _VIEWER_PASSWORD or "",
+    )
+    if ok_user and ok_pass:
+        return None
+    return Response(
+        "需要登录（HTTP Basic）",
+        401,
+        {"WWW-Authenticate": 'Basic realm="Winit inventory"'},
+        mimetype="text/plain; charset=utf-8",
+    )
 
 
 def _conn() -> sqlite3.Connection:
