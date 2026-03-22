@@ -1,0 +1,20 @@
+# 安装：sudo cp deploy/winit-analytics.service.example /etc/systemd/system/winit-analytics.service
+# 按需改路径与用户，然后：sudo systemctl daemon-reload
+#
+# 与 myapp.service 完全独立；Type=oneshot 表示执行完即退出，适合「登录自检 / 后续抓数脚本」。
+
+[Unit]
+Description=winit analytics — browser login job (oneshot)
+After=network.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/opt/winit-analytics
+Environment="PATH=/opt/winit-analytics/.venv/bin"
+# 使用项目内 .env（login_winit.py 会通过 python-dotenv 加载）
+ExecStart=/opt/winit-analytics/.venv/bin/python /opt/winit-analytics/login_winit.py
+
+[Install]
+WantedBy=multi-user.target

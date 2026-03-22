@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# 用法：复制到服务器 /opt/winit-analytics/deploy.sh，chmod +x
+# 仅更新本项目，绝不重启 myapp
+
+set -euo pipefail
+cd /opt/winit-analytics
+git pull origin main
+source .venv/bin/activate
+pip install -r requirements.txt
+echo "winit-analytics 代码与依赖已更新。myapp 未改动。"

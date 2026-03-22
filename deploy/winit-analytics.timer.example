@@ -1,0 +1,14 @@
+# 安装：sudo cp deploy/winit-analytics.timer.example /etc/systemd/system/winit-analytics.timer
+# sudo systemctl daemon-reload && sudo systemctl enable --now winit-analytics.timer
+#
+# 示例：每天 06:30 执行一次 winit-analytics.service（按需改 OnCalendar）
+
+[Unit]
+Description=Run winit-analytics.service on a schedule
+
+[Timer]
+OnCalendar=*-*-* 06:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
