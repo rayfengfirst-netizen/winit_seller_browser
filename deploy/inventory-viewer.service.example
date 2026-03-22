@@ -1,0 +1,23 @@
+# 只读库存网页：监听公网需配合 .env 中 WINIT_VIEWER_USER / WINIT_VIEWER_PASSWORD
+#
+# sudo cp deploy/inventory-viewer.service.example /etc/systemd/system/inventory-viewer.service
+# sudo systemctl daemon-reload && sudo systemctl enable --now inventory-viewer.service
+#
+# 云安全组：放行 TCP WINIT_VIEWER_PORT（默认 8765），建议仅允许你的办公/家庭公网 IP。
+# 访问：http://<公网IP>:8765/
+
+[Unit]
+Description=Winit inventory DB read-only web viewer (Flask)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/winit-analytics
+Environment="PATH=/opt/winit-analytics/.venv/bin"
+ExecStart=/opt/winit-analytics/.venv/bin/python /opt/winit-analytics/inventory_viewer.py
+Restart=on-failure
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target
