@@ -2,7 +2,8 @@
 Winit 卖家后台：用 Playwright 打开页面并尝试登录。
 
 环境变量（.env）：
-  WINIT_USERNAME / WINIT_PASSWORD  必填
+  WINIT_USERNAME / WINIT_PASSWORD  必填（账号 1，与多账号方案二选一或并存）
+  多账号见 winit_accounts.py；WINIT_ACCOUNT_ID 选账号；WINIT_RUN_ALL_ACCOUNTS=1 顺序登录验证
   WINIT_HEADLESS                     可选 true/false，默认 false
   WINIT_LOGIN_URL                    可选，默认官方登录页
 
@@ -31,6 +32,8 @@ from playwright.sync_api import (
     Error as PlaywrightError,
     TimeoutError as PlaywrightTimeoutError,
 )
+
+from winit_accounts import list_winit_accounts, pick_active_account, run_all_winit_accounts_requested
 
 ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env")
@@ -316,19 +319,116 @@ def _shutdown(page: Optional[Page], context, browser) -> None:
             pass
 
 
-def run() -> int:
-    user = os.environ.get("WINIT_USERNAME", "").strip()
-    password = os.environ.get("WINIT_PASSWORD", "")
+def login_on_page(
+    page: Page,
+    *,
+    user: str,
+    password: str,
+    form_wait_ms: int,
+    login_url: Optional[str] = None,
+) -> int:
+    """
+    在已有 Page 上完成登录（不创建浏览器）。
+    返回码：0 成功；2 无表单；3 无按钮；4 登录失败。
+    """
+    if login_url is None:
+        login_url = os.environ.get("WINIT_LOGIN_URL", DEFAULT_LOGIN_URL).strip() or DEFAULT_LOGIN_URL
+    page.goto(login_url, wait_until="domcontentloaded", timeout=90_000)
+    _wait_for_password_field_anywhere(page, form_wait_ms)
+
+    if _looks_logged_in(page):
+        print("已登录状态，无需填表。当前 URL：", page.url)
+        return 0
+
+    container, acc, pwd = _find_account_password(page)
+    if acc is None or pwd is None:
+        page.goto(BASE_URL, wait_until="domcontentloaded", timeout=90_000)
+        _wait_for_password_field_anywhere(page, min(form_wait_ms, 30_000))
+        if _looks_logged_in(page):
+            print("从首页判断已登录。当前 URL：", page.url)
+            return 0
+        container, acc, pwd = _find_account_password(page)
+
+    if acc is None or pwd is None:
+        shot = ROOT / "screenshots" / "login_form_not_found.png"
+        shot.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            page.screenshot(path=str(shot), full_page=True)
+        except PlaywrightError:
+            pass
+        print(
+            f"未找到账号或密码框，已截图：{shot}\n"
+            "请用开发者工具查看 input 的 id/name/class，加到 ACCOUNT_LOCATORS / PASSWORD_LOCATORS。",
+            file=sys.stderr,
+        )
+        return 2
+
+    acc.click()
+    acc.fill("")
+    acc.fill(user)
+    pwd.click()
+    pwd.fill("")
+    pwd.fill(password)
+
+    clicked = _click_login(container)
+    if not clicked:
+        try:
+            pwd.press("Enter")
+            clicked = True
+        except PlaywrightError:
+            pass
+    if not clicked:
+        shot = ROOT / "screenshots" / "login_button_not_found.png"
+        shot.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            page.screenshot(path=str(shot), full_page=True)
+        except PlaywrightError:
+            pass
+        print(f"未找到登录按钮，已截图：{shot}", file=sys.stderr)
+        return 3
+
+    try:
+        page.wait_for_load_state("load", timeout=20_000)
+    except PlaywrightTimeoutError:
+        pass
+    _wait_for_login_outcome(page, timeout_sec=45.0)
+
+    if _looks_logged_in(page):
+        try:
+            print("登录成功（按页面内容判断）。当前 URL：", page.url)
+        except PlaywrightError:
+            print("登录成功（按页面内容判断）。")
+        return 0
+
+    if _probably_still_login_form(page) or "/user/login" in page.url.lower():
+        print(
+            "登录未成功：未检测到后台界面。当前 URL：",
+            page.url,
+            file=sys.stderr,
+        )
+        _print_login_failure_feedback(page)
+        shot = ROOT / "screenshots" / "login_still_on_login_page.png"
+        shot.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            page.screenshot(path=str(shot), full_page=True)
+        except PlaywrightError:
+            pass
+        print(f"已保存截图便于人工查看：{shot}", file=sys.stderr)
+        return 4
+
+    try:
+        print("已离开登录 URL。当前 URL：", page.url)
+    except PlaywrightError:
+        print("已离开登录 URL。")
+    return 0
+
+
+def _run_login_for_credentials(user: str, password: str) -> int:
     headless = os.environ.get("WINIT_HEADLESS", "false").lower() in ("1", "true", "yes")
-    login_url = os.environ.get("WINIT_LOGIN_URL", DEFAULT_LOGIN_URL).strip() or DEFAULT_LOGIN_URL
     try:
         form_wait_ms = int(os.environ.get("WINIT_FORM_WAIT_MS", "45000"))
     except ValueError:
         form_wait_ms = 45_000
-
-    if not user or not password:
-        print("请在 .env 中设置 WINIT_USERNAME 和 WINIT_PASSWORD（见 .env.example）", file=sys.stderr)
-        return 1
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=headless)
@@ -340,96 +440,35 @@ def run() -> int:
         page: Optional[Page] = None
         try:
             page = context.new_page()
-            page.goto(login_url, wait_until="domcontentloaded", timeout=90_000)
-            _wait_for_password_field_anywhere(page, form_wait_ms)
-
-            if _looks_logged_in(page):
-                print("已登录状态，无需填表。当前 URL：", page.url)
-                return 0
-
-            container, acc, pwd = _find_account_password(page)
-            if acc is None or pwd is None:
-                page.goto(BASE_URL, wait_until="domcontentloaded", timeout=90_000)
-                _wait_for_password_field_anywhere(page, min(form_wait_ms, 30_000))
-                if _looks_logged_in(page):
-                    print("从首页判断已登录。当前 URL：", page.url)
-                    return 0
-                container, acc, pwd = _find_account_password(page)
-
-            if acc is None or pwd is None:
-                shot = ROOT / "screenshots" / "login_form_not_found.png"
-                shot.parent.mkdir(parents=True, exist_ok=True)
-                try:
-                    page.screenshot(path=str(shot), full_page=True)
-                except PlaywrightError:
-                    pass
-                print(
-                    f"未找到账号或密码框，已截图：{shot}\n"
-                    "请用开发者工具查看 input 的 id/name/class，加到 ACCOUNT_LOCATORS / PASSWORD_LOCATORS。",
-                    file=sys.stderr,
-                )
-                return 2
-
-            acc.click()
-            acc.fill("")
-            acc.fill(user)
-            pwd.click()
-            pwd.fill("")
-            pwd.fill(password)
-
-            clicked = _click_login(container)
-            if not clicked:
-                try:
-                    pwd.press("Enter")
-                    clicked = True
-                except PlaywrightError:
-                    pass
-            if not clicked:
-                shot = ROOT / "screenshots" / "login_button_not_found.png"
-                shot.parent.mkdir(parents=True, exist_ok=True)
-                try:
-                    page.screenshot(path=str(shot), full_page=True)
-                except PlaywrightError:
-                    pass
-                print(f"未找到登录按钮，已截图：{shot}", file=sys.stderr)
-                return 3
-
-            try:
-                page.wait_for_load_state("load", timeout=20_000)
-            except PlaywrightTimeoutError:
-                pass
-            _wait_for_login_outcome(page, timeout_sec=45.0)
-
-            if _looks_logged_in(page):
-                try:
-                    print("登录成功（按页面内容判断）。当前 URL：", page.url)
-                except PlaywrightError:
-                    print("登录成功（按页面内容判断）。")
-                return 0
-
-            if _probably_still_login_form(page) or "/user/login" in page.url.lower():
-                print(
-                    "登录未成功：未检测到后台界面。当前 URL：",
-                    page.url,
-                    file=sys.stderr,
-                )
-                _print_login_failure_feedback(page)
-                shot = ROOT / "screenshots" / "login_still_on_login_page.png"
-                shot.parent.mkdir(parents=True, exist_ok=True)
-                try:
-                    page.screenshot(path=str(shot), full_page=True)
-                except PlaywrightError:
-                    pass
-                print(f"已保存截图便于人工查看：{shot}", file=sys.stderr)
-                return 4
-
-            try:
-                print("已离开登录 URL。当前 URL：", page.url)
-            except PlaywrightError:
-                print("已离开登录 URL。")
-            return 0
+            return login_on_page(page, user=user, password=password, form_wait_ms=form_wait_ms)
         finally:
             _shutdown(page, context, browser)
+
+
+def run() -> int:
+    accs = list_winit_accounts()
+    if not accs:
+        print(
+            "请在 .env 中配置账号：WINIT_USERNAME/WINIT_PASSWORD 或 WINIT_ACCOUNT_*（见 .env.example）",
+            file=sys.stderr,
+        )
+        return 1
+    if run_all_winit_accounts_requested():
+        exit_code = 0
+        for account in accs:
+            print(
+                f"\n{'=' * 60}\n登录验证：账号 {account.display_name()}  {account.username}\n{'=' * 60}\n",
+                flush=True,
+            )
+            code = _run_login_for_credentials(account.username, account.password)
+            if code != 0:
+                exit_code = code
+        return exit_code
+    account = pick_active_account(accs)
+    if account is None:
+        return 1
+    print(f"当前账号：{account.display_name()}  {account.username}", flush=True)
+    return _run_login_for_credentials(account.username, account.password)
 
 
 if __name__ == "__main__":

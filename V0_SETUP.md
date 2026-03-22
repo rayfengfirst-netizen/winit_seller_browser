@@ -7,7 +7,7 @@
 | 地方 | 是什么 | 怎么进去 |
 |------|--------|----------|
 | **① 本机（你的 Mac）** | 放代码的文件夹 `winit_seller_browser` | 打开终端，先 `cd` 进这个文件夹 |
-| **② 服务器（Linux）** | 以后代码在 `/opt/winit-analytics` | 终端里执行 `ssh root@服务器IP`，登录后再 `cd` |
+| **② 服务器（Linux）** | 以后代码在 `/opt/winit-analytics` | 与 myapp 同机：`ssh root@8.218.58.28`，登录后再 `cd` |
 
 下面每一步都会写清楚：**① 本机** 还是 **② 服务器**，以及**必须先 `cd` 到哪里**。
 
@@ -38,10 +38,10 @@ chmod +x scripts/*.sh
 cd /Users/fengchangrui/Desktop/cursor/winit_seller_browser
 ```
 
-**再执行**（把 `服务器IP` 换成真实 IP，例如 `8.218.58.28`）：
+**再执行**（与 myapp 同机）：
 
 ```bash
-./scripts/verify_ssh.sh root@服务器IP
+./scripts/verify_ssh.sh root@8.218.58.28
 ```
 
 看到 **`SSH_OK`** 就过。
@@ -75,22 +75,24 @@ git push -u origin main
 
 **在哪里：** ② 服务器  
 
-**4.1 用本机终端登录服务器**（还在 Mac 上敲）：
+**4.1 用本机终端登录服务器**（还在 Mac 上敲，与 myapp 相同）：
 
 ```bash
-ssh root@服务器IP
+ssh root@8.218.58.28
 ```
 
 登录成功后，提示符会变成服务器上的，**下面命令都在服务器上敲**。
 
-**4.2 在服务器上克隆仓库**（把仓库地址改成你的）：
+**4.2 在服务器上克隆仓库**（官方仓库示例；也可改用 SSH）：
 
 ```bash
 mkdir -p /opt
 cd /opt
-git clone git@github.com:你的GitHub用户名/winit-analytics.git winit-analytics
+git clone https://github.com/rayfengfirst-netizen/winit_seller_browser.git winit-analytics
 cd /opt/winit-analytics
 ```
+
+（仓库名是 `winit_seller_browser`，本地目录名用 `winit-analytics` 与部署文档一致。）
 
 **4.3 仍在服务器、且当前目录已是 `/opt/winit-analytics`**，安装 Python 环境：
 
@@ -156,10 +158,10 @@ echo $?
 cd /Users/fengchangrui/Desktop/cursor/winit_seller_browser
 ```
 
-**再执行**（IP 换成你的）：
+**再执行**：
 
 ```bash
-export WINIT_REMOTE=root@服务器IP
+export WINIT_REMOTE=root@8.218.58.28
 ./scripts/verify_server_remote.sh
 ```
 

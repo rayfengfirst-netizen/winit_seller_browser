@@ -2,7 +2,8 @@
 
 在万邑通卖家后台（`seller.winit.com.cn`）完成浏览器自动化登录，为后续数据采集与分析提供会话基础。
 
-**不熟悉 Git / 服务器时，先看 → [BEGINNER_GUIDE.md](./BEGINNER_GUIDE.md)**（本地怎么保存代码、怎么推 GitHub、服务器怎么更新，都写在一起）。
+**不熟悉 Git / 服务器时，先看 → [BEGINNER_GUIDE.md](./BEGINNER_GUIDE.md)**（本地怎么保存代码、怎么推 GitHub、服务器怎么更新，都写在一起）。  
+**要录操作并生成代码（和 myapp 里 `playwright codegen` 一样）：** 本机执行 `./scripts/winit_codegen.sh`，见 [RECORDING.md](./RECORDING.md)。
 
 ## 与 myapp 的关系
 
@@ -16,7 +17,18 @@
 
 ## 仓库目录
 
-- `login_winit.py` — 登录脚本（读 `.env`）
+- `login_winit.py` — 仅登录
+- **`step01_australia_index.py`** — **第一步**：登录 → Australia/index → 截图  
+- **`step02_australia_export.py`** — **第二步**：登录 → 澳大利亚页 → 导出 SKU 仓库级库存 → 导出中心 → 下载（文件在 `downloads/`）
+- **`step03_unpack_winit_export.py`** — **第三步**：解压导出 zip → 预览 xlsx 表头与样例行 → 可选 `--export-csv`（依赖 `openpyxl`）
+- **`run_daily_winit_job.py`** — **定时主线**：按顺序对每个已配置账号执行 step02 下载 → 解压 → 写入 **SQLite 日快照**（`artifacts/winit_inventory.db`，路径可用 `WINIT_SQLITE_PATH` 覆盖）
+- `winit_inventory_db.py` / `winit_inventory_ingest.py` — 表结构 `inventory_daily`（按 `snapshot_date` + `account_id` 整批替换）与 `sync_runs` 运行记录
+- `deploy/winit-daily-sync.service.example` + `winit-daily-sync.timer.example` — systemd 每日触发示例
+- **`inventory_viewer.py`** — 本机只读网页浏览 SQLite（默认 `http://127.0.0.1:8765/`）
+- **`scripts/run_full_inventory_sync.sh`** — 一键：两账号（或全部已配置账号）依次 **下载 zip → 解压 → 入库**（内部调用 `run_daily_winit_job.py`）
+- `download_winit.py` — 登录后按流程下载（等你把「模拟操作」脚本发给我再接）
+- `winit_download_flow.py` — 流程步骤解析
+- `download_flow.example.json` — 流程示例（复制为 `download_flow.json` 后自行修改）
 - `requirements.txt`
 - `deploy/` — systemd / 定时任务示例
 - `DEPLOY_WITH_MYAPP.md` — **与现有 myapp 同机部署的逐步说明**

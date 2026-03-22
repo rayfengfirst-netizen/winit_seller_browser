@@ -1,0 +1,11 @@
+# 与 winit-daily-sync.service 配套；示例每天 07:15（服务器本地时区）执行
+
+[Unit]
+Description=Timer for winit-daily-sync.service
+
+[Timer]
+OnCalendar=*-*-* 07:15:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

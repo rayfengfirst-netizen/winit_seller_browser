@@ -5,3 +5,6 @@ __pycache__/
 *.pyc
 playwright-state/
 screenshots/
+downloads/
+artifacts/
+.playwright/

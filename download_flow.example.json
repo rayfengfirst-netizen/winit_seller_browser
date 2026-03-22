@@ -1,0 +1,31 @@
+{
+  "comment": "复制为 download_flow.json 后按你的真实页面改 URL 和按钮文案；勿提交含隐私的 URL 到公开仓库",
+  "steps": [
+    {
+      "action": "goto",
+      "url": "https://seller.winit.com.cn/",
+      "timeout_ms": 90000
+    },
+    {
+      "action": "wait_ms",
+      "ms": 2000
+    },
+    {
+      "action": "click_text",
+      "text": "数据中心",
+      "exact": false,
+      "timeout_ms": 30000
+    },
+    {
+      "action": "wait_ms",
+      "ms": 1500
+    },
+    {
+      "action": "download",
+      "role": "button",
+      "name_pattern": "导出|下载|Export|Download",
+      "timeout_ms": 120000,
+      "save_as": "winit_export.xlsx"
+    }
+  ]
+}

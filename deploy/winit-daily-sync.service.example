@@ -1,0 +1,25 @@
+# 每日：多账号导出 + 库存入库（SQLite）
+#
+# 安装示例：
+#   sudo cp deploy/winit-daily-sync.service.example /etc/systemd/system/winit-daily-sync.service
+#   sudo cp deploy/winit-daily-sync.timer.example /etc/systemd/system/winit-daily-sync.timer
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now winit-daily-sync.timer
+#
+# 请修改 User / WorkingDirectory / PATH 为实际部署路径（可与 DEPLOY_WITH_MYAPP.md 中 /opt/winit-analytics 一致）。
+
+[Unit]
+Description=winit daily — export inventory zip per account and ingest to SQLite
+After=network.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/opt/winit-analytics
+Environment="PATH=/opt/winit-analytics/.venv/bin"
+# 依赖项目根目录 .env（账号密码、HEADLESS 等）
+ExecStart=/opt/winit-analytics/.venv/bin/python /opt/winit-analytics/run_daily_winit_job.py
+
+[Install]
+WantedBy=multi-user.target
