@@ -28,6 +28,8 @@
   - 无域名：在 `.env` 设 `WINIT_VIEWER_HOST=0.0.0.0`、`WINIT_VIEWER_USER` / `WINIT_VIEWER_PASSWORD` 后访问 `http://公网IP:8765/`（安全组只放行你的 IP）
   - 常驻：`deploy/inventory-viewer.service.example` → `systemctl enable --now inventory-viewer`
 - **`scripts/run_full_inventory_sync.sh`** — 一键：两账号（或全部已配置账号）依次 **下载 zip → 解压 → 入库**（内部调用 `run_daily_winit_job.py`）
+- **`run_no_sales_morning_job.py`** — **无动销预警**：读最新快照，飞书推送摘要 + 详情链接；详情页为 `inventory_viewer` 的 `/report/no-sales`
+- `deploy/winit-no-sales-alert.service.example` + `.timer.example` — 默认每天 **09:00** 发飞书（与 06:00 入库 timer 独立）
 - `download_winit.py` — 登录后按流程下载（等你把「模拟操作」脚本发给我再接）
 - `winit_download_flow.py` — 流程步骤解析
 - `download_flow.example.json` — 流程示例（复制为 `download_flow.json` 后自行修改）

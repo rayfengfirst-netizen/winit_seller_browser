@@ -1,0 +1,19 @@
+# 每日 09:00 无动销预警 → 飞书（需 .env：WINIT_FEISHU_WEBHOOK_URL、WINIT_PUBLIC_BASE_URL）
+#
+# sudo cp deploy/winit-no-sales-alert.service.example /etc/systemd/system/winit-no-sales-alert.service
+# sudo cp deploy/winit-no-sales-alert.timer.example /etc/systemd/system/winit-no-sales-alert.timer
+# sudo systemctl daemon-reload && sudo systemctl enable --now winit-no-sales-alert.timer
+
+[Unit]
+Description=winit no-sales morning alert (Feishu)
+After=network.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/winit-analytics
+Environment="PATH=/opt/winit-analytics/.venv/bin"
+ExecStart=/opt/winit-analytics/.venv/bin/python /opt/winit-analytics/run_no_sales_morning_job.py
+
+[Install]
+WantedBy=multi-user.target

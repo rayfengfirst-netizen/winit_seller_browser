@@ -1,0 +1,11 @@
+# 每天 09:00（服务器本地时区）发无动销飞书摘要
+
+[Unit]
+Description=Timer for winit-no-sales-alert.service
+
+[Timer]
+OnCalendar=*-*-* 09:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

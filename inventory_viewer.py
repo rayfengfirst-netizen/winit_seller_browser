@@ -13,6 +13,9 @@
   WINIT_VIEWER_HOST   默认 127.0.0.1（需公网访问时可设 0.0.0.0，务必配下面账号密码）
   WINIT_VIEWER_PORT   默认 8765
   WINIT_VIEWER_USER / WINIT_VIEWER_PASSWORD  若均非空，则整站 HTTP Basic 认证
+
+报表：
+  /report/no-sales  无动销预警（规则见 winit_no_sales_report.py）
 """
 
 from __future__ import annotations
@@ -31,6 +34,10 @@ ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env")
 
 from winit_inventory_db import connect, init_schema, sqlite_path  # noqa: E402
+from winit_no_sales_report import (  # noqa: E402
+    collect_no_sales_rows,
+    render_no_sales_report_html,
+)
 
 app = Flask(__name__)
 
@@ -111,6 +118,7 @@ def index() -> str:
 <body>
   <h1>Winit 库存快照</h1>
   <p class="muted">数据库文件：<code>{db}</code></p>
+  <p><a href="/report/no-sales">无动销预警（按规则筛选）→</a></p>
   <h2>按日期 · 账号汇总</h2>
   <table>
     <thead><tr><th>快照日期</th><th>账号 ID</th><th>登录名</th><th>行数</th><th></th></tr></thead>
@@ -274,6 +282,24 @@ def runs() -> str:
   </table>
 </body>
 </html>"""
+
+
+@app.route("/report/no-sales")
+def report_no_sales() -> str:
+    """无动销预警明细；可选 ?account_id=1&snapshot_date=YYYY-MM-DD"""
+    aid = request.args.get("account_id", type=int)
+    sd = request.args.get("snapshot_date", "").strip() or None
+    with _conn() as conn:
+        rows, th_meta = collect_no_sales_rows(
+            conn, account_id=aid, snapshot_date=sd
+        )
+    parts = []
+    if aid is not None:
+        parts.append(f"account_id={aid}")
+    if sd:
+        parts.append(f"snapshot_date={sd}")
+    note = ("筛选：" + " ".join(parts)) if parts else "各账号使用各自最新快照日"
+    return render_no_sales_report_html(rows, th_meta, query_note=note)
 
 
 @app.route("/runs/<int:run_id>")
