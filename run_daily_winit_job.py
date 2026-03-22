@@ -10,7 +10,8 @@
   cd winit_seller_browser && source .venv/bin/activate
   python run_daily_winit_job.py
 
-服务器上与 systemd timer 配合：见 deploy/winit-daily-sync.service.example
+服务器上与 systemd timer 配合：见 deploy/winit-daily-sync.timer.example（默认每天 06:00 服务器本地时区）。
+完成后若设置 WINIT_FEISHU_WEBHOOK_URL，会向飞书群发送文本摘要。
 """
 
 from __future__ import annotations
@@ -35,6 +36,7 @@ from winit_accounts import (  # noqa: E402
     list_winit_accounts,
     resolve_download_dir_for_account,
 )
+from winit_feishu_webhook import feishu_send_text  # noqa: E402
 from winit_inventory_db import connect, init_schema, log_sync_run, sqlite_path  # noqa: E402
 from winit_inventory_ingest import ingest_inventory_xlsx  # noqa: E402
 
@@ -73,7 +75,7 @@ def run_one_account(
     snapshot_date: str,
     *,
     skip_download: bool,
-) -> int:
+) -> tuple[int, int, str]:
     started = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     zip_path_str = ""
     try:
@@ -93,7 +95,7 @@ def run_one_account(
                     started_at=started,
                     finished_at=finished,
                 )
-                return code
+                return code, 0, f"step02 退出码 {code}"
 
         zip_path = find_latest_zip_for_account(account)
         zip_path_str = str(zip_path)
@@ -131,7 +133,7 @@ def run_one_account(
             f"日期 {snapshot_date}，zip {zip_path_str}",
             flush=True,
         )
-        return 0
+        return 0, n, ""
     except Exception as e:
         finished = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         log_sync_run(
@@ -148,33 +150,61 @@ def run_one_account(
         )
         print(f"[daily] 账号 {account.id} 失败：", e, file=sys.stderr)
         traceback.print_exc()
-        return 1
+        short = f"{type(e).__name__}: {e}"
+        return 1, 0, short[:800]
 
 
 def main() -> int:
     accs = list_winit_accounts()
     if not accs:
         print("未配置任何 Winit 账号（.env）", file=sys.stderr)
+        feishu_send_text("❌ 万邑通库存同步失败：未配置任何账号（.env）")
         return 1
 
     snapshot_date = _snapshot_date_str()
     skip_dl = _skip_download()
+    db_path = sqlite_path()
     print(
         f"[daily] 快照日期 {snapshot_date}，账号数 {len(accs)}，"
-        f"跳过下载={'是' if skip_dl else '否'}，库 {sqlite_path()}",
+        f"跳过下载={'是' if skip_dl else '否'}，库 {db_path}",
         flush=True,
     )
 
     conn = connect()
     init_schema(conn)
     exit_code = 0
+    lines: list[str] = [
+        "📦 万邑通库存同步",
+        f"快照日期：{snapshot_date}",
+        f"SQLite：{db_path}",
+        f"模式：{'仅入库(跳过浏览器)' if skip_dl else '浏览器下载+入库'}",
+        "",
+    ]
     try:
         for account in accs:
-            code = run_one_account(conn, account, snapshot_date, skip_download=skip_dl)
+            code, rows, err = run_one_account(
+                conn, account, snapshot_date, skip_download=skip_dl
+            )
             if code != 0:
                 exit_code = code
+            if code == 0:
+                lines.append(f"✅ 账号 {account.id}（{account.username}）入库 {rows} 行")
+            else:
+                lines.append(f"❌ 账号 {account.id}（{account.username}）失败：{err}")
     finally:
         conn.close()
+
+    lines[0] = (
+        "📦 万邑通库存同步 ✅ 全部成功"
+        if exit_code == 0
+        else "📦 万邑通库存同步 ⚠️ 有账号失败"
+    )
+    summary = "\n".join(lines)
+
+    ok, detail = feishu_send_text(summary)
+    print(f"[daily] 飞书通知：{'成功' if ok else '失败'} ({detail})", flush=True)
+    if not ok:
+        print(summary, file=sys.stderr)
 
     return exit_code
 

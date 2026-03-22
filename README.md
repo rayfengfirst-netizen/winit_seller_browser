@@ -23,7 +23,7 @@
 - **`step03_unpack_winit_export.py`** — **第三步**：解压导出 zip → 预览 xlsx 表头与样例行 → 可选 `--export-csv`（依赖 `openpyxl`）
 - **`run_daily_winit_job.py`** — **定时主线**：按顺序对每个已配置账号执行 step02 下载 → 解压 → 写入 **SQLite 日快照**（`artifacts/winit_inventory.db`，路径可用 `WINIT_SQLITE_PATH` 覆盖）
 - `winit_inventory_db.py` / `winit_inventory_ingest.py` — 表结构 `inventory_daily`（按 `snapshot_date` + `account_id` 整批替换）与 `sync_runs` 运行记录
-- `deploy/winit-daily-sync.service.example` + `winit-daily-sync.timer.example` — systemd 每日触发示例
+- `deploy/winit-daily-sync.service.example` + `winit-daily-sync.timer.example` — systemd **每天 06:00（服务器本地时区）**触发；完成后可通过 `WINIT_FEISHU_WEBHOOK_URL` 发飞书文本摘要
 - **`inventory_viewer.py`** — 只读网页浏览 SQLite（表格化界面，可扩展为后续业务页的基础）
   - 无域名：在 `.env` 设 `WINIT_VIEWER_HOST=0.0.0.0`、`WINIT_VIEWER_USER` / `WINIT_VIEWER_PASSWORD` 后访问 `http://公网IP:8765/`（安全组只放行你的 IP）
   - 常驻：`deploy/inventory-viewer.service.example` → `systemctl enable --now inventory-viewer`

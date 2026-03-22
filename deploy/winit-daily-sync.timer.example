@@ -1,10 +1,12 @@
-# 与 winit-daily-sync.service 配套；示例每天 07:15（服务器本地时区）执行
+# 与 winit-daily-sync.service 配套；每天 06:00（systemd 使用服务器本地时区）
+# 若主机为 UTC 而业务要北京时间 06:00，请改为 OnCalendar=*-*-* 22:00:00 UTC
+# 或执行：sudo timedatectl set-timezone Asia/Shanghai
 
 [Unit]
 Description=Timer for winit-daily-sync.service
 
 [Timer]
-OnCalendar=*-*-* 07:15:00
+OnCalendar=*-*-* 06:00:00
 Persistent=true
 
 [Install]
