@@ -1,0 +1,13 @@
+# 中国时间（北京时间）每天 10:10 发入库上架类流水摘要（主机时区请设为 Asia/Shanghai）
+#
+#   sudo timedatectl set-timezone Asia/Shanghai
+
+[Unit]
+Description=Timer for winit-inout-shelf-alert.service (10:10 local)
+
+[Timer]
+OnCalendar=*-*-* 10:10:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

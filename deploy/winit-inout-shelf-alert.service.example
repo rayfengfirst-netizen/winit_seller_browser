@@ -1,0 +1,24 @@
+# 入库上架类流水飞书摘要：读 WINIT_INOUT_SQLITE_PATH → 按日期汇总两类备注 → Webhook inout_shelf
+# 建议在当日 winit-inout-sync（如 05:00）入库之后再跑；默认定时见 .timer.example：10:10 本地时区
+# .env：WINIT_FEISHU_WEBHOOK_INOUT_SHELF、WINIT_PUBLIC_BASE_URL（可选）
+#
+# sudo cp deploy/winit-inout-shelf-alert.service.example /etc/systemd/system/winit-inout-shelf-alert.service
+# sudo cp deploy/winit-inout-shelf-alert.timer.example /etc/systemd/system/winit-inout-shelf-alert.timer
+# sudo systemctl daemon-reload && sudo systemctl enable --now winit-inout-shelf-alert.timer
+
+[Unit]
+Description=winit inout shelf morning digest (Feishu)
+After=network.target
+
+[Service]
+Type=oneshot
+TimeoutStartSec=300
+User=root
+WorkingDirectory=/opt/winit-analytics
+Environment="PATH=/opt/winit-analytics/.venv/bin"
+StandardOutput=journal
+StandardError=journal
+ExecStart=/opt/winit-analytics/.venv/bin/python /opt/winit-analytics/run_inout_shelf_morning_job.py
+
+[Install]
+WantedBy=multi-user.target

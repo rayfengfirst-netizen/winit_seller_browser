@@ -164,6 +164,12 @@
 | 详情页体验 | SKU 卡片 + 聚合指标网格 + 分仓表；**多账号 Tab**；图例与色条 | 同上（`render_no_sales_report_html` 内联 CSS/JS） |
 | 文档 | README / OPERATIONS / 本文 / `.env.example` / `inventory_viewer` 注释 | 各 md |
 
+**双轨运行约束（固定）**
+
+- 轨道 A（老需求库存）：`Australia/index` → `run_daily_winit_job.py` → `winit-daily-sync.timer`。  
+- 轨道 B（新增 inout）：`Australia/inventoryFlow` → `run_inventory_inout_job.py` → `winit-inout-sync.timer`。  
+- 原则：A 不变，B 新增；后续迭代默认只动 B，除非明确提出要改 A。
+
 **后续改无动销时优先打开**
 
 - 业务规则与飞书模板：`winit_no_sales_report.py`（`STAT_RULE_LINE`、`format_no_sales_feishu_text`、`collect_no_sales_rows`）  

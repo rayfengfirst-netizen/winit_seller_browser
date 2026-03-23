@@ -70,16 +70,16 @@ def _prof_mark(label: str) -> None:
         p.mark(label)
 
 
-AUSTRALIA_INDEX_URL = "https://seller.winit.com.cn/Australia/index"
+# 注意：以下入口/匹配配置需在运行时读取，便于调用方临时覆盖环境变量。
+_DEFAULT_ENTRY_URL = "https://seller.winit.com.cn/Australia/index"
 EXPORT_CENTER_INDEX_URL = os.environ.get(
     "WINIT_EXPORT_CENTER_URL",
     "https://seller.winit.com.cn/ExportCenter/index",
 ).strip()
 PAGE_TAB_IFRAME = "#pageTabContent iframe"
-# 与录制一致：单选项完整 accessible name
-RADIO_SKU_WAREHOUSE = "导出SKU仓库级库存 按SKU导出国家内每个仓库的库存数据"
+_DEFAULT_EXPORT_DIALOG_RADIO_LABEL = "导出SKU仓库级库存 按SKU导出国家内每个仓库的库存数据"
 # 导出中心列表里匹配任务行（避免写死日期）；可用环境变量覆盖
-ROW_MATCH_TEXT = os.environ.get("WINIT_EXPORT_ROW_MATCH", "海外仓库存").strip() or "海外仓库存"
+_DEFAULT_EXPORT_ROW_MATCH = "海外仓库存"
 # 进入导出中心后该行可能先「正在生成」，站点自动刷新后才变为可下载状态
 EXPORT_ROW_READY_STATUS = os.environ.get("WINIT_EXPORT_READY_STATUS", "导出成功").strip() or "导出成功"
 # 站点实际多为「保存本地」（见 dump #exportDataList）；可用 | 分隔多个，依次尝试
@@ -88,6 +88,20 @@ EXPORT_FAIL_STATUS = os.environ.get("WINIT_EXPORT_FAIL_STATUS", "导出失败").
 
 # 隐藏 JSON 里任务完成标记（抓包 HTML 为 "status":"DONE"）
 _EXPORT_JSON_DONE_MARKERS = ('"status":"DONE"', '"status":"Done"')
+
+
+def _entry_url() -> str:
+    return os.environ.get("WINIT_STEP02_ENTRY_URL", _DEFAULT_ENTRY_URL).strip() or _DEFAULT_ENTRY_URL
+
+
+def _row_match_text() -> str:
+    return os.environ.get("WINIT_EXPORT_ROW_MATCH", _DEFAULT_EXPORT_ROW_MATCH).strip() or _DEFAULT_EXPORT_ROW_MATCH
+
+
+def _export_dialog_radio_label() -> str:
+    return (
+        os.environ.get("WINIT_EXPORT_DIALOG_RADIO_LABEL", _DEFAULT_EXPORT_DIALOG_RADIO_LABEL).strip()
+    )
 
 
 def _save_link_text_candidates() -> list[str]:
@@ -504,9 +518,16 @@ def _click_export_by_scanning_all_frames(page: Page) -> None:
 
 def _export_dialog_act(page: Page, tab_frame: FrameLocator) -> None:
     """导出弹窗里的单选 + 确定；可能在 iframe 或 Ant Design Portal（主文档）。"""
+    if os.environ.get("WINIT_EXPORT_DIALOG_SKIP", "").lower() in ("1", "true", "yes"):
+        print("已跳过导出弹窗确认（WINIT_EXPORT_DIALOG_SKIP）", flush=True)
+        return
+
+    radio_label = _export_dialog_radio_label()
+
     def _radio_then_ok(use_page: bool) -> None:
         loc = page if use_page else tab_frame
-        loc.get_by_role("radio", name=RADIO_SKU_WAREHOUSE).check(timeout=20_000)
+        if radio_label:
+            loc.get_by_role("radio", name=radio_label).check(timeout=20_000)
         loc.get_by_role("button", name="确定").click(timeout=20_000)
 
     try:
@@ -515,7 +536,8 @@ def _export_dialog_act(page: Page, tab_frame: FrameLocator) -> None:
         try:
             _radio_then_ok(use_page=True)
         except Exception:
-            page.get_by_role("dialog").get_by_role("radio", name=RADIO_SKU_WAREHOUSE).check(timeout=15_000)
+            if radio_label:
+                page.get_by_role("dialog").get_by_role("radio", name=radio_label).check(timeout=15_000)
             page.get_by_role("dialog").get_by_role("button", name="确定").click(timeout=15_000)
 
 
@@ -610,7 +632,7 @@ def _export_list_inner_frame(page: Page) -> Optional[Frame]:
         _prof_mark("导出中心：跳过 iframe/role=row 扫描，使用主文档")
         return page.main_frame
 
-    hit = _frame_with_matching_export_row(page, ROW_MATCH_TEXT)
+    hit = _frame_with_matching_export_row(page, _row_match_text())
     if hit is not None:
         return hit
 
@@ -1153,8 +1175,9 @@ def _run_step02_for_account(account: WinitAccount) -> int:
             _dismiss_modal_if_any(page)
             _prof_mark("首屏弹窗处理结束")
 
-            print("正在打开 Australia 页面…", flush=True)
-            page.goto(AUSTRALIA_INDEX_URL, wait_until="domcontentloaded", timeout=90_000)
+            entry_url = _entry_url()
+            print(f"正在打开入口页面… {entry_url}", flush=True)
+            page.goto(entry_url, wait_until="domcontentloaded", timeout=90_000)
             try:
                 page.wait_for_load_state("load", timeout=45_000)
             except PlaywrightTimeoutError:
@@ -1176,7 +1199,8 @@ def _run_step02_for_account(account: WinitAccount) -> int:
 
             row_wait = _wait_ms_from_env("WINIT_STEP02_EXPORT_ROW_WAIT_MS", 120_000)
             ready_wait = _wait_ms_from_env("WINIT_STEP02_EXPORT_READY_WAIT_MS", 180_000)
-            row_pat = re.compile(re.escape(ROW_MATCH_TEXT))
+            row_match_text = _row_match_text()
+            row_pat = re.compile(re.escape(row_match_text))
 
             shell_ms = _wait_ms_from_env("WINIT_STEP02_EXPORT_CENTER_SHELL_MS", 20_000)
             print(
@@ -1192,7 +1216,7 @@ def _run_step02_for_account(account: WinitAccount) -> int:
             # 主表格常在子 frame / 微前端内，勿只用 main_frame
             print(
                 "导出中心：步骤 1/3 主表格 ant-table（自动选含「"
-                + ROW_MATCH_TEXT
+                + row_match_text
                 + "」的 frame）…",
                 flush=True,
             )

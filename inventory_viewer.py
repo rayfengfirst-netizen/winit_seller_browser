@@ -15,7 +15,8 @@
   WINIT_VIEWER_USER / WINIT_VIEWER_PASSWORD  若均非空，则整站 HTTP Basic 认证
 
 报表：
-  /report/no-sales  无动销预警（多账号 Tab；①②③ 分类，见 winit_no_sales_report.py）
+  /report/no-sales     无动销预警（多账号 Tab；①②③ 分类，见 winit_no_sales_report.py）
+  /report/inout-shelf  各账号上架核对：两类上架备注；账号汇总 + 日期矩阵 + 按业务日明细（见 winit_inout_shelf_report.py）
 """
 
 from __future__ import annotations
@@ -39,6 +40,11 @@ from winit_accounts import account_display_for_row, account_id_display_map  # no
 from winit_inventory_db import connect, init_schema, sqlite_path  # noqa: E402
 from winit_view_format import cell_int_str  # noqa: E402
 from winit_view_theme import VIEWER_THEME_CSS  # noqa: E402
+from winit_inout_shelf_report import (  # noqa: E402
+    collect_inout_shelf_rows,
+    render_inout_shelf_report_html,
+)
+from winit_inventory_inout_db import connect_inout, init_inout_schema  # noqa: E402
 from winit_no_sales_report import (  # noqa: E402
     collect_no_sales_rows,
     render_no_sales_report_html,
@@ -149,6 +155,7 @@ def index() -> str:
   </header>
   <div class="toolbar">
     <a href="/report/no-sales" class="primary">无动销预警</a>
+    <a href="/report/inout-shelf">各账号上架核对</a>
     <a href="/runs">同步运行记录</a>
   </div>
   <p class="muted">数据库文件 <code>{db}</code></p>
@@ -327,6 +334,18 @@ def runs() -> str:
 </div>
 </body>
 </html>"""
+
+
+@app.route("/report/inout-shelf")
+def report_inout_shelf() -> str:
+    """inventoryFlow 独立库：筛选两类备注，按业务日期分块、数量降序。"""
+    conn = connect_inout()
+    init_inout_schema(conn)
+    try:
+        blocks, meta = collect_inout_shelf_rows(conn)
+    finally:
+        conn.close()
+    return render_inout_shelf_report_html(blocks, meta)
 
 
 @app.route("/report/no-sales")

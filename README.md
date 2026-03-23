@@ -17,13 +17,25 @@
 
 ## 仓库目录
 
+### 双轨约束（重要）
+
+- **老链路（库存）保持不变**：入口固定 `https://seller.winit.com.cn/Australia/index`，由 `run_daily_winit_job.py` 驱动。
+- **新链路（inventoryFlow）独立新增**：入口固定 `https://seller.winit.com.cn/Australia/inventoryFlow`，由 `run_inventory_inout_job.py` 驱动。
+- 两条链路分别使用独立任务入口与定时器，互不覆盖、互不替换。
+
 - `login_winit.py` — 仅登录
 - **`step01_australia_index.py`** — **第一步**：登录 → Australia/index → 截图  
 - **`step02_australia_export.py`** — **第二步**：登录 → 澳大利亚页 → 导出 SKU 仓库级库存 → 导出中心 → 下载（文件在 `downloads/`）
 - **`step03_unpack_winit_export.py`** — **第三步**：解压导出 zip → 预览 xlsx 表头与样例行 → 可选 `--export-csv`（依赖 `openpyxl`）
 - **`run_daily_winit_job.py`** — **定时主线**：按顺序对每个已配置账号执行 step02 下载 → 解压 → 写入 **SQLite 日快照**（`artifacts/winit_inventory.db`，路径可用 `WINIT_SQLITE_PATH` 覆盖）
+- **`run_inventory_inout_job.py`** — **5 点链路**：按账号打开 `Australia/inventoryFlow` 导出，去导出中心下载名含 `InventoryInoutSeller` 的最新文件，解压表格后入**独立 SQLite**（按账号覆盖写入，不保留每日历史）并推飞书
 - `winit_inventory_db.py` / `winit_inventory_ingest.py` — 表结构 `inventory_daily`（按 `snapshot_date` + `account_id` 整批替换）与 `sync_runs` 运行记录
+- `winit_inventory_inout_db.py` — 独立库 `winit_inout.db`（默认）与表 `inventory_inout_current` / `inventory_inout_latest_meta`
+- `winit_inout_shelf_report.py` — 从独立库筛选备注「标准入库-上架」「国内直发入库-上架」，按日期分块、按数量排序；网页 `/report/inout-shelf`
+- **`run_inout_shelf_morning_job.py`** — **10:10 飞书摘要**（`WINIT_FEISHU_WEBHOOK_INOUT_SHELF`）；依赖当日已入库的 inout 数据
 - `deploy/winit-daily-sync.service.example` + `winit-daily-sync.timer.example` — systemd **每天本地 06:00** 触发；**请将服务器时区设为 `Asia/Shanghai`** 即北京时间早 6 点入库（见 timer 文件头注释）；完成后飞书「sync」场景通知（`WINIT_FEISHU_WEBHOOK_SYNC` 或兼容 `WINIT_FEISHU_WEBHOOK_URL`，见 `winit_feishu_webhook.py`）
+- `deploy/winit-inout-sync.service.example` + `winit-inout-sync.timer.example` — systemd **每天本地 05:00** 触发 inventoryFlow 导出/下载（北京时间 5 点）
+- `deploy/winit-inout-shelf-alert.service.example` + `.timer.example` — 默认每天 **本地 10:10** 发入库上架类流水飞书摘要（与 inout 库一致）
 - **`inventory_viewer.py`** — 只读网页浏览 SQLite（表格化界面；**服务器上通常用 8765 作库存首页**，与 `WINIT_PUBLIC_BASE_URL` 端口对齐）
   - 无域名：在 `.env` 设 `WINIT_VIEWER_HOST=0.0.0.0`、`WINIT_VIEWER_USER` / `WINIT_VIEWER_PASSWORD` 后访问 `http://公网IP:8765/`（安全组只放行你的 IP）
   - 常驻：`deploy/inventory-viewer.service.example` → `systemctl enable --now inventory-viewer`

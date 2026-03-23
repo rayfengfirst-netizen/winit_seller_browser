@@ -1,0 +1,13 @@
+# 中国时间（北京时间）每天 05:00 执行 InventoryInoutSeller 下载入库。
+# OnCalendar 使用主机本地时区；要得到北京时间，请先：
+#   sudo timedatectl set-timezone Asia/Shanghai
+
+[Unit]
+Description=Timer for winit-inout-sync.service (05:00 local = Beijing if TZ is Asia/Shanghai)
+
+[Timer]
+OnCalendar=*-*-* 05:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

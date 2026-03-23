@@ -1,0 +1,25 @@
+# 每日：按账号执行 inventoryFlow 导出并下载 InventoryInoutSeller 文件，
+# 并写入 SQLite 元数据表 inventory_inout_runs。
+#
+# 安装：
+#   sudo cp deploy/winit-inout-sync.service.example /etc/systemd/system/winit-inout-sync.service
+#   sudo cp deploy/winit-inout-sync.timer.example /etc/systemd/system/winit-inout-sync.timer
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now winit-inout-sync.timer
+
+[Unit]
+Description=winit inout daily — download InventoryInoutSeller per account
+After=network.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/opt/winit-analytics
+Environment="PATH=/opt/winit-analytics/.venv/bin"
+StandardOutput=journal
+StandardError=journal
+ExecStart=/opt/winit-analytics/.venv/bin/python /opt/winit-analytics/run_inventory_inout_job.py
+
+[Install]
+WantedBy=multi-user.target

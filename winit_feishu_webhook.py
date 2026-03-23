@@ -4,7 +4,7 @@
 按「场景」配置不同 URL，便于入库通知、无动销、后续告警等发到不同群。
 
 环境变量（整段 URL，勿提交到 Git）：
-  WINIT_FEISHU_WEBHOOK_<场景大写>   例：WINIT_FEISHU_WEBHOOK_SYNC、WINIT_FEISHU_WEBHOOK_NO_SALES
+  WINIT_FEISHU_WEBHOOK_<场景大写>   例：WINIT_FEISHU_WEBHOOK_SYNC、WINIT_FEISHU_WEBHOOK_NO_SALES、WINIT_FEISHU_WEBHOOK_INOUT_SHELF
   channel 名使用小写+下划线，对应环境变量后缀为全大写下划线。
 
 兼容旧配置：
