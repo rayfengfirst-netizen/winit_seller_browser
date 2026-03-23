@@ -19,7 +19,7 @@
 - 飞书 **分场景 Webhook**：`winit_feishu_webhook.py` — `sync`（入库完成）与 `no_sales`（无动销）分离。
 - 只读站：`inventory_viewer.py`，默认 **8765**，首页 + `/table` + `/runs` + `/report/no-sales`。
 - 无动销：`winit_no_sales_report.py` + `run_no_sales_morning_job.py`；规则与定时见 README「无动销预警」及下文 §5。
-- UI：`winit_view_theme.py` + `winit_view_format.py`（分块、配色、表格 **整数**）；按 **账号分块**展示。
+- UI：`winit_view_theme.py` + `winit_view_format.py`；无动销详情 **多账号 Tab** + ①②③ 色块 + SKU 卡片；可用整数、均销小数。
 
 ---
 
@@ -68,6 +68,8 @@
 | 无动销 | `no_sales` | **`WINIT_FEISHU_WEBHOOK_NO_SALES`（必填，不回退到 URL）** |
 | 扩展 | 自定义 | `WINIT_FEISHU_WEBHOOK_<大写>` + `feishu_send_text(..., channel="snake_case")` |
 
+**飞书限流重试**（`winit_feishu_webhook.py`）：遇 **11232 / 429** 等可自动等待重试；可选环境变量 `WINIT_FEISHU_RATE_LIMIT_RETRIES`（默认 3）、`WINIT_FEISHU_RATE_LIMIT_DELAY_SEC`（默认 45）。
+
 **详情链接**：`WINIT_PUBLIC_BASE_URL` 必须为 **公网可访问** 基址（无尾斜杠），否则飞书里仍是 `127.0.0.1`。
 
 ### 4.2 北京时间定时
@@ -80,6 +82,7 @@
 
 - **timer 与 service 成对安装**：仅 `.timer` 无对应 `.service` 会报 **「unit … to trigger not loaded」**。  
 - **日志**：oneshot 建议 `[Service]` 中 `StandardOutput=journal`、`StandardError=journal`（已写入 `deploy/*.service.example`）。  
+- **无动销 oneshot 超时**：飞书 **11232 频率限制** 时会自动重试等待；`winit-no-sales-alert.service` 需 **`TimeoutStartSec=300`**（或更大），否则重试中被 systemd 杀掉。  
 - **验收**：`systemctl list-timers`、`journalctl -u winit-no-sales-alert.service`、`systemctl start …` 手动试跑。
 
 ---
@@ -143,11 +146,33 @@
 
 ## 9. 建议的下一步工作（可按优先级）
 
-1. **观察首个完整日**：6:00 入库 + 10:00 无动销各看一次 `journalctl` 与飞书、详情链接。  
-2. **提交 Git**：将 `deploy` 中 `StandardOutput=journal` 等改动与本文一并纳入版本管理。  
-3. **可选**：inventory_viewer 改为 gunicorn；安全组/防火墙仅放行可信 IP + **HTTP Basic** 已配则保持。  
-4. **新需求入库**：新业务飞书场景 → 新增 `WINIT_FEISHU_WEBHOOK_*` + `channel`；新报表页 → 复用 `VIEWER_THEME_CSS` 与 `cell_int_str`。  
-5. **与 myapp 视觉对齐**：与前端约定主色/辅色/字号后，回填到 `winit_view_theme.py` 的 `:root` 变量。
+1. **日常观察**：6:00 入库 + 10:00 无动销各看一次 `journalctl`、飞书、**Tab 详情页**链接是否正常。  
+2. **可选**：`inventory_viewer` 长期用 **gunicorn** 替代 Flask 开发服务器；安全组仅放行可信 IP，**HTTP Basic** 保持。  
+3. **新需求**：新业务飞书 → 新增 `WINIT_FEISHU_WEBHOOK_*` + `channel`；新报表 → 复用 `VIEWER_THEME_CSS`、`cell_int_str` / 无动销页的模块化 HTML/CSS 模式。  
+4. **与 myapp 视觉对齐**：约定主色/辅色/字号后回填 `winit_view_theme.py` 的 `:root`。
+
+---
+
+## 10. 迭代归档快照（便于续做）
+
+**时间线（约 2025-03）— 已合入 `main` 的主题**
+
+| 主题 | 说明 | 主要文件 |
+|------|------|----------|
+| 飞书限流补偿 | 11232/429 时重试；无动销 service 建议 `TimeoutStartSec=300` | `winit_feishu_webhook.py`、`deploy/winit-no-sales-alert.service.example` |
+| 无动销统计改版 | **账号 → SKU 聚合（跨仓求和）** → ①②③ 互斥分类；**单仓仅「可用≠0」** 参与（**已弃用 7 日均库**作门槛） | `winit_no_sales_report.py`、`run_no_sales_morning_job.py` |
+| 详情页体验 | SKU 卡片 + 聚合指标网格 + 分仓表；**多账号 Tab**；图例与色条 | 同上（`render_no_sales_report_html` 内联 CSS/JS） |
+| 文档 | README / OPERATIONS / 本文 / `.env.example` / `inventory_viewer` 注释 | 各 md |
+
+**后续改无动销时优先打开**
+
+- 业务规则与飞书模板：`winit_no_sales_report.py`（`STAT_RULE_LINE`、`format_no_sales_feishu_text`、`collect_no_sales_rows`）  
+- 页面结构/样式：同文件 `render_no_sales_report_html`、`NO_SALES_EXTRA_CSS`  
+- 线上发布：`cd /opt/winit-analytics && git pull && pip install -r requirements.txt && sudo systemctl restart inventory-viewer`（**勿** `restart myapp`）
+
+**口径一句话（当前）**
+
+> 单仓可用≠0 的行进入该 SKU 的加总；聚合后若 7 天均销=0，再分 ①（15/30≠0）②（7/15=0 且 30≠0）③（全 0）或其它。
 
 ---
 
