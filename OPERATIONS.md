@@ -13,7 +13,7 @@
 | 入库完成飞书 | `winit_feishu_webhook.py` → `channel="sync"` | `WINIT_FEISHU_WEBHOOK_SYNC` 或兼容 `WINIT_FEISHU_WEBHOOK_URL` |
 | 只读库存网站（首页 8765） | `inventory_viewer.py` | `/`、`/table`、`/runs`、`/report/no-sales`；`WINIT_VIEWER_*`、`WINIT_PUBLIC_BASE_URL` |
 | 无动销统计与飞书 | `winit_no_sales_report.py`、`run_no_sales_morning_job.py` | `channel="no_sales"` → **`WINIT_FEISHU_WEBHOOK_NO_SALES`（必填，不与 sync 混用）** |
-| 无动销规则 | `winit_no_sales_report.py`、README「无动销预警」 | 基础：可用≠0、7 日均库>0；飞书按账号报 7/15/30 均销为 0 条数；详情页仅「五项全满足」 |
+| 无动销规则 | `winit_no_sales_report.py`、README「无动销预警」 | 按账号内 SKU 聚合各仓后：可用之和≠0、7 日均库之和>0；仅「聚合后 7 天均销=0」的 SKU 分 ①②③（及其它）；飞书报 SKU 数；详情按仓库行 |
 | 页面样式与表格整数 | `winit_view_theme.py`、`winit_view_format.py` | 供 `inventory_viewer` 与无动销 HTML 共用 |
 | 试发无动销飞书 | `test_no_sales_feishu.py` | 打印模板并可真发 |
 
