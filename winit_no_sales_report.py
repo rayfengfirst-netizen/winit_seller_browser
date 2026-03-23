@@ -3,9 +3,8 @@
 
 规则与定时任务说明见 README「无动销预警」与 run_no_sales_morning_job.py 文档字符串。
 
-基础条件（**每个仓库行**须同时满足；仅将满足条件的行纳入该 SKU 的聚合与明细）：
-  - 可用库存 ≠ 0
-  - 7 天平均库存 > 0（列名兼容「7天平均库存」「7日平均库存」）
+基础条件（**每个仓库行**；仅将满足条件的行纳入该 SKU 的聚合与明细）：
+  - **可用库存 ≠ 0**（不再使用「7 日平均库存」字段，避免与业务侧口径不一致）
 
 同一 SKU 多仓：只对**通过上述条件的行**求和，再判定 7/15/30 天均销与①②③分类。
 仅在「聚合后 7 天平均日销量为 0」的 SKU 上，再分为三种互斥情况（另有「其它」）：
@@ -33,7 +32,6 @@ from winit_view_format import cell_int_str
 from winit_view_theme import VIEWER_THEME_CSS
 
 # row_json 中可能出现的列名别名（万邑通导出表头）
-_KEYS_AVG_INV_7 = ("7天平均库存", "7日平均库存")
 _KEYS_AVG_SALES_7 = ("7天平均日销量",)
 _KEYS_AVG_SALES_15 = ("15天平均日销量",)
 _KEYS_AVG_SALES_30 = ("30天平均日销量",)
@@ -59,10 +57,6 @@ def _is_nonzero_available(q: Optional[float]) -> bool:
     if q is None:
         return False
     return abs(float(q)) > 1e-12
-
-
-def _avg_inv_7_ok(v: Optional[float]) -> bool:
-    return v is not None and v > 0
 
 
 def _sales_is_zero(v: Optional[float]) -> bool:
@@ -119,7 +113,6 @@ def _metrics_from_row(row: sqlite3.Row) -> Dict[str, Any]:
         "name_zh": row["name_zh"] or "",
         "qty_available": _float_cell(row["qty_available"]),
         "qty_on_hand": _float_cell(row["qty_on_hand"]),
-        "avg_inv_7": _float_from_keys(d, _KEYS_AVG_INV_7),
         "avg_sales_7": _float_from_keys(d, _KEYS_AVG_SALES_7),
         "avg_sales_15": _float_from_keys(d, _KEYS_AVG_SALES_15),
         "avg_sales_30": _float_from_keys(d, _KEYS_AVG_SALES_30),
@@ -128,15 +121,19 @@ def _metrics_from_row(row: sqlite3.Row) -> Dict[str, Any]:
     }
 
 
+def passes_base_filter_no_sales(m: Dict[str, Any]) -> bool:
+    """无动销：仅要求可用库存≠0（不使用 7 日均库）。"""
+    return _is_nonzero_available(m.get("qty_available"))
+
+
 def passes_base_filter(m: Dict[str, Any]) -> bool:
-    if not _is_nonzero_available(m["qty_available"]):
-        return False
-    return _avg_inv_7_ok(m["avg_inv_7"])
+    """兼容旧名：与无动销当前口径一致（仅可用库存）。"""
+    return passes_base_filter_no_sales(m)
 
 
 def passes_strict_no_sales(m: Dict[str, Any]) -> bool:
-    """单仓行：旧版「五项全满足」；保留供对照，主流程已改为 SKU 聚合。"""
-    if not passes_base_filter(m):
+    """单仓行：三种均销均为 0（在基础条件之上）。"""
+    if not passes_base_filter_no_sales(m):
         return False
     return (
         _sales_is_zero(m["avg_sales_7"])
@@ -170,19 +167,16 @@ def _sales_cell_str(v: Any) -> str:
 
 
 def _sku_aggregate_metrics(grp: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """同一账号、同一 SKU 下多仓行的聚合指标（销量、库存均按行求和）。"""
+    """同一账号、同一 SKU 下多仓行的聚合指标（可用与各期均销按行求和）。"""
     qty_sum = 0.0
-    inv7_sum = 0.0
     s7 = s15 = s30 = 0.0
     for m in grp:
         qty_sum += _sum_float(m.get("qty_available"))
-        inv7_sum += _sum_float(m.get("avg_inv_7"))
         s7 += _sum_float(m.get("avg_sales_7"))
         s15 += _sum_float(m.get("avg_sales_15"))
         s30 += _sum_float(m.get("avg_sales_30"))
     return {
         "qty_sum": qty_sum,
-        "inv7_sum": inv7_sum,
         "avg_sales_7": s7,
         "avg_sales_15": s15,
         "avg_sales_30": s30,
@@ -190,9 +184,8 @@ def _sku_aggregate_metrics(grp: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def passes_base_filter_sku(agg: Dict[str, Any]) -> bool:
-    if not _is_nonzero_available(agg["qty_sum"]):
-        return False
-    return _avg_inv_7_ok(agg["inv7_sum"])
+    """SKU 聚合后仍有可用库存（各参与行之和）。"""
+    return _is_nonzero_available(agg["qty_sum"])
 
 
 def classify_sku_case(s7: float, s15: float, s30: float) -> int:
@@ -236,8 +229,8 @@ CASE_KIND_UI = {
 }
 
 STAT_RULE_LINE = (
-    "统计口径：仅「单仓可用≠0 且 7日均库>0」的仓库行参与该 SKU 的加总；"
-    "再对聚合后 7 天均销=0 的 SKU 分①②③（或其它）。均销列建议看小数，勿与四舍五入整数混淆。"
+    "统计口径：仅「单仓可用≠0」的仓库行参与该 SKU 加总；"
+    "再对聚合后 7 天均销=0 的 SKU 分①②③（或其它）。均销列保留小数。"
 )
 
 
@@ -310,7 +303,7 @@ def collect_no_sales_rows(
 
         for sku_k, grp in by_sku.items():
             # 基础条件按「仓行」生效：只把满足条件的行纳入聚合与详情，避免未达标仓污染 SKU 汇总
-            grp_ok = [m for m in grp if passes_base_filter(m)]
+            grp_ok = [m for m in grp if passes_base_filter_no_sales(m)]
             if not grp_ok:
                 continue
             agg = _sku_aggregate_metrics(grp_ok)
@@ -473,7 +466,6 @@ def _table_rows_html(sub: List[Dict[str, Any]]) -> str:
             f"<td>{html_module.escape(str(m.get('sku') or ''))}</td>"
             f"<td>{html_module.escape((m.get('name_zh') or '')[:100])}</td>"
             f"<td class=\"num\">{html_module.escape(cell_int_str(m.get('qty_available')))}</td>"
-            f"<td class=\"num\">{html_module.escape(cell_int_str(m.get('avg_inv_7')))}</td>"
             f"<td class=\"num\">{html_module.escape(_sales_cell_str(m.get('avg_sales_7')))}</td>"
             f"<td class=\"num\">{html_module.escape(_sales_cell_str(m.get('avg_sales_15')))}</td>"
             f"<td class=\"num\">{html_module.escape(_sales_cell_str(m.get('avg_sales_30')))}</td>"
@@ -512,7 +504,6 @@ def _sku_card_html(
     nm_e = html_module.escape(nm) if nm else ""
     metrics = [
         ("可用库存（合计）", cell_int_str(agg["qty_sum"])),
-        ("7 日均库（合计）", cell_int_str(agg["inv7_sum"])),
         ("7 天均销（合计）", _sales_cell_str(agg["avg_sales_7"])),
         ("15 天均销（合计）", _sales_cell_str(agg["avg_sales_15"])),
         ("30 天均销（合计）", _sales_cell_str(agg["avg_sales_30"])),
@@ -582,8 +573,8 @@ def render_no_sales_report_html(
     """每账号独立区块；块内按情况①②③分块，每块内先 SKU 汇总再分仓。"""
     n_rows = len(rows)
     rule = (
-        "先按仓行筛掉「可用=0 或 7 日均库≤0」；同一 SKU 仅对剩余行求和再分类。"
-        "①②③ 以聚合均销为准；表中均销列保留小数，避免与取整混淆。"
+        "基础条件：单仓「可用≠0」即参与该 SKU 加总（不使用 7 日均库）。"
+        "①②③ 以聚合均销为准；多账号时可用顶部 Tab 切换。"
     )
     note_e = html_module.escape(query_note) if query_note else ""
     stat_e = html_module.escape(th_meta.get("stat_rule_line", STAT_RULE_LINE))
@@ -592,7 +583,7 @@ def render_no_sales_report_html(
     for m in rows:
         rows_by_aid[int(m["account_id"])].append(m)
 
-    tables_html = ""
+    panel_fragments: List[Tuple[int, str, str]] = []
     account_order = [b["account_id"] for b in (th_meta.get("by_account") or [])]
     seen = set(account_order)
     for aid in sorted(rows_by_aid.keys()):
@@ -602,7 +593,7 @@ def render_no_sales_report_html(
     thead = (
         "<thead><tr>"
         "<th>快照</th><th>仓库</th><th>SKU</th><th>品名</th>"
-        "<th class=\"num\">可用</th><th class=\"num\">7日均库</th>"
+        "<th class=\"num\">可用</th>"
         "<th class=\"num\">7天均销</th><th class=\"num\">15天均销</th><th class=\"num\">30天均销</th>"
         "</tr></thead>"
     )
@@ -680,20 +671,48 @@ def render_no_sales_report_html(
             if not case_sections
             else ""
         )
-        tables_html += (
+        section_html = (
             "<section class=\"card acct-section ns-account\">"
             f"{acct_head}"
             f"{stats_block}"
             f"<div class=\"ns-account-cases\">{case_sections or empty_acct}</div>"
             "</section>"
         )
+        panel_fragments.append((aid, h, section_html))
 
-    if not tables_html and not rows:
+    tables_html = ""
+    if not panel_fragments and not rows:
         tables_html = (
             "<section class=\"card acct-section\"><h2 class=\"acct\">数据</h2>"
             "<table class=\"data\">"
             f"{thead}<tbody>"
-            "<tr><td colspan=9>无符合条件的数据</td></tr></tbody></table></section>"
+            "<tr><td colspan=8>无符合条件的数据</td></tr></tbody></table></section>"
+        )
+    elif len(panel_fragments) == 1:
+        tables_html = (
+            f'<div class="ns-tabs-wrap ns-tabs-single">{panel_fragments[0][2]}</div>'
+        )
+    else:
+        tab_btns: List[str] = []
+        tab_panels: List[str] = []
+        for i, (aid, lbl_e, inner) in enumerate(panel_fragments):
+            act = " active" if i == 0 else ""
+            sel = "true" if i == 0 else "false"
+            tab_btns.append(
+                f"<button type=\"button\" class=\"ns-tab{act}\" role=\"tab\" "
+                f'aria-selected="{sel}" data-panel="{aid}" id="ns-tabbtn-{aid}">{lbl_e}</button>'
+            )
+            tab_panels.append(
+                f'<div class="ns-tab-panel{act}" role="tabpanel" id="ns-panel-{aid}" '
+                f'aria-labelledby="ns-tabbtn-{aid}" tabindex="0">{inner}</div>'
+            )
+        tables_html = (
+            '<div class="ns-tabs-wrap">'
+            '<div class="ns-tab-bar" role="tablist" aria-label="按账号切换">'
+            f"{''.join(tab_btns)}"
+            "</div>"
+            f'<div class="ns-tab-panels">{"".join(tab_panels)}</div>'
+            "</div>"
         )
 
     c1 = cell_int_str(th_meta.get("count_case1", 0))
@@ -807,9 +826,30 @@ def render_no_sales_report_html(
       color: var(--accent-dark); }
     .ns-wh-hint { margin: 0 0 0.35rem 0; font-size: 0.75rem; color: var(--muted); }
     .ns-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: 8px; }
-    .ns-table-wrap table.data { font-size: 12px; min-width: 720px; }
+    .ns-table-wrap table.data { font-size: 12px; min-width: 620px; }
     .ns-table-wrap table.data th, .ns-table-wrap table.data td { padding: 6px 8px; }
     section.card.ns-account { padding-top: 1rem; }
+    .ns-tabs-wrap { margin-bottom: 1.25rem; }
+    .ns-tab-bar {
+      display: flex; flex-wrap: wrap; gap: 0.4rem;
+      padding: 0.5rem 0.65rem; margin-bottom: 0.75rem;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+      box-shadow: 0 1px 3px rgba(15,23,42,.06);
+    }
+    .ns-tab {
+      cursor: pointer; border: 1px solid var(--border); background: #f8fafc;
+      color: var(--text); padding: 0.45rem 0.95rem; border-radius: 999px;
+      font-size: 0.85rem; font-weight: 700; transition: background .15s, color .15s, border-color .15s;
+    }
+    .ns-tab:hover { background: #e2e8f0; border-color: #94a3b8; }
+    .ns-tab.active {
+      background: var(--accent-dark); color: #fff; border-color: var(--accent-dark);
+      box-shadow: 0 2px 8px rgba(13,148,136,.35);
+    }
+    .ns-tab-panel { display: none; }
+    .ns-tab-panel.active { display: block; animation: ns-tab-in .18s ease-out; }
+    @keyframes ns-tab-in { from { opacity: 0.55; } to { opacity: 1; } }
+    .ns-tabs-single .ns-tab-panel.active { display: block; }
     """
 
     return f"""<!DOCTYPE html>
@@ -827,7 +867,7 @@ def render_no_sales_report_html(
   </div>
   <header class="banner">
     <h1>无动销预警</h1>
-    <p class="sub">账号 → 三种情况分块 → 每 SKU 卡片（聚合指标 + 分仓表）</p>
+    <p class="sub">多账号用 Tab 切换；块内分①②③ → 每 SKU 聚合 + 分仓表</p>
   </header>
   <nav class="ns-legend" aria-label="分类说明">
     <div class="ns-legend-row">
@@ -842,9 +882,31 @@ def render_no_sales_report_html(
     <span class="muted">入库/快照：</span>{html_module.escape(str(th_meta.get("ingest_time_display") or ""))}<br/>
     <strong>{html_module.escape(cnt_line)}</strong>
   </div>
-  <p class="muted">按账号分块，块内再分情况；新增账号会自动多一块。{note_e}</p>
+  <p class="muted">多账号时点击顶部 Tab 切换；单账号不显示 Tab。{note_e}</p>
   <p class="muted" style="margin-bottom:1rem">{stat_e}</p>
   {tables_html}
 </div>
+<script>
+(function(){{
+  var bar = document.querySelector(".ns-tab-bar");
+  if (!bar) return;
+  function activate(aid) {{
+    var s = String(aid);
+    bar.querySelectorAll(".ns-tab").forEach(function(btn) {{
+      var on = btn.getAttribute("data-panel") === s;
+      btn.classList.toggle("active", on);
+      btn.setAttribute("aria-selected", on ? "true" : "false");
+    }});
+    document.querySelectorAll(".ns-tab-panel").forEach(function(p) {{
+      p.classList.toggle("active", p.id === "ns-panel-" + s);
+    }});
+  }}
+  bar.addEventListener("click", function(e) {{
+    var t = e.target.closest(".ns-tab");
+    if (!t) return;
+    activate(t.getAttribute("data-panel"));
+  }});
+}})();
+</script>
 </body>
 </html>"""

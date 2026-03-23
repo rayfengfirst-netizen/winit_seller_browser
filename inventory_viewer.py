@@ -15,7 +15,7 @@
   WINIT_VIEWER_USER / WINIT_VIEWER_PASSWORD  若均非空，则整站 HTTP Basic 认证
 
 报表：
-  /report/no-sales  无动销预警（SKU 聚合后分①②③；表内为各仓明细，见 winit_no_sales_report.py）
+  /report/no-sales  无动销预警（多账号 Tab；①②③ 分类，见 winit_no_sales_report.py）
 """
 
 from __future__ import annotations
