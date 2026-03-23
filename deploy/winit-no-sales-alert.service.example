@@ -13,9 +13,13 @@ After=network.target
 
 [Service]
 Type=oneshot
+# 飞书 11232 频率限制时默认最多额外重试 3 次、间隔 45s，总等待可能达数分钟；勿用默认 90s 超时杀掉进程
+TimeoutStartSec=300
 User=root
 WorkingDirectory=/opt/winit-analytics
 Environment="PATH=/opt/winit-analytics/.venv/bin"
+StandardOutput=journal
+StandardError=journal
 ExecStart=/opt/winit-analytics/.venv/bin/python /opt/winit-analytics/run_no_sales_morning_job.py
 
 [Install]

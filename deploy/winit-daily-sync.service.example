@@ -18,6 +18,8 @@ User=root
 Group=root
 WorkingDirectory=/opt/winit-analytics
 Environment="PATH=/opt/winit-analytics/.venv/bin"
+StandardOutput=journal
+StandardError=journal
 # 依赖项目根目录 .env（账号密码、HEADLESS 等）
 ExecStart=/opt/winit-analytics/.venv/bin/python /opt/winit-analytics/run_daily_winit_job.py
 

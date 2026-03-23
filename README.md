@@ -53,6 +53,7 @@
 - `deploy/` — systemd / 定时任务示例
 - `DEPLOY_WITH_MYAPP.md` — **与现有 myapp 同机部署的逐步说明**
 - **`OPERATIONS.md`** — **需求与代码对照、Git 发布与线上测试清单**
+- **`RETROSPECTIVE_AND_NEXT.md`** — **与 myapp 同机复盘、业务/UI/定时沉淀、后续工作建议**
 
 ## 本地运行
 
@@ -69,7 +70,8 @@ python login_winit.py
 
 - **从 GitHub 拉到服务器（一步步）：** [SERVER_QUICKSTART.md](./SERVER_QUICKSTART.md)  
 - **与 myapp 同机、互不干扰：** [DEPLOY_WITH_MYAPP.md](./DEPLOY_WITH_MYAPP.md)  
-- **发布前回顾、`.env`、systemd、飞书、线上验证：** [OPERATIONS.md](./OPERATIONS.md)
+- **发布前回顾、`.env`、systemd、飞书、线上验证：** [OPERATIONS.md](./OPERATIONS.md)  
+- **阶段性复盘与下一步：** [RETROSPECTIVE_AND_NEXT.md](./RETROSPECTIVE_AND_NEXT.md)
 
 ## v0（连通 + 推送 + 服务器跑通）
 
