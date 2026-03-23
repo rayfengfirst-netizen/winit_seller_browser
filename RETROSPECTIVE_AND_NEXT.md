@@ -209,6 +209,7 @@
 - `/report/inout-shelf` 明细表**固定 7 列**（顺序：商品编码、数量、仓库、库存变动日期（北京时间）、期初库存、期末库存、单据号）；**商品编码支持点击复制**；矩阵与顶部统计区配色收敛，重点突出数量与 SKU。
 - 导出表头与默认列名不一致时，用 `.env` 中 `WINIT_INOUT_SHELF_SKU_KEYS` / `WH_KEYS` / `QTY_BEGIN_KEYS` / `QTY_END_KEYS` / `DOC_KEYS` 追加候选键（见 `.env.example`）。
 - 对应实现与部署：`996bc1b`（已合并 `main`，生产 `inventory-viewer` 已 `git pull` + `restart`）。
+- 同账号同日相同 SKU 合并：`90f7018`（数量汇总，减少重复行；页面显示“合并后 X 行 / 原 Y 条”）。
 - 运维侧：`OPERATIONS.md` 已含 **「新增需求互不干扰（准入清单）」**、inout 相关 timer 与线上测试项，便于后续扩展不串线。
 
 ---
