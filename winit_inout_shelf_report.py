@@ -10,8 +10,10 @@
   WINIT_INOUT_SHELF_QTY_KEYS     默认 数量|入库数量|Qty
   WINIT_INOUT_SHELF_DATE_KEYS    默认 库存变动日期 北京时间|库存变动日期|…（见代码内完整列表）
   WINIT_INOUT_SHELF_MATRIX_DAYS  覆盖矩阵展示最近几个业务日（默认 14，范围 3～62）
-  WINIT_INOUT_SHELF_HIDDEN_COLUMNS  不在明细表展示的列（竖线分隔）
-      默认 商品登记|类型|规格|英文名称
+
+明细表**固定 7 列**（顺序固定）：商品编码、数量、仓库、库存变动日期（北京时间）、期初库存、期末库存、单据号。
+列名与导出表头不一致时，可用下列环境变量追加候选键（竖线分隔）：
+  WINIT_INOUT_SHELF_SKU_KEYS / WH_KEYS / QTY_BEGIN_KEYS / QTY_END_KEYS / DOC_KEYS
 
 数据依赖 run_inventory_inout_job.py 写入的 WINIT_INOUT_SQLITE_PATH（默认 artifacts/winit_inout.db）。
 """
@@ -130,16 +132,52 @@ def _sort_date_blocks(keys: List[str]) -> List[str]:
     return sorted(known, reverse=True) + unk
 
 
-def _hidden_column_strips() -> set[str]:
-    raw = _pipe_keys(
-        "WINIT_INOUT_SHELF_HIDDEN_COLUMNS",
-        "商品登记|类型|规格|英文名称",
+def _uniq_strings(seq: List[str]) -> List[str]:
+    seen: set[str] = set()
+    out: List[str] = []
+    for x in seq:
+        if x not in seen:
+            seen.add(x)
+            out.append(x)
+    return out
+
+
+def _detail_column_definitions(
+    qty_keys: List[str],
+    date_keys: List[str],
+) -> List[Tuple[str, List[str]]]:
+    """页面明细表：固定列标题顺序 + 每列候选导出表头（从左到右优先）。"""
+    date_for_cell = _uniq_strings(
+        list(date_keys)
+        + [
+            "库存变动日期（北京时间）",
+            "库存变动日期(北京时间)",
+        ]
     )
-    return {h.strip() for h in raw if h.strip()}
-
-
-def _column_visible(name: str, hidden: set[str]) -> bool:
-    return str(name).strip() not in hidden
+    return [
+        (
+            "商品编码",
+            _pipe_keys("WINIT_INOUT_SHELF_SKU_KEYS", "商品编码|SKU|sku|产品编码"),
+        ),
+        ("数量", list(qty_keys)),
+        (
+            "仓库",
+            _pipe_keys("WINIT_INOUT_SHELF_WH_KEYS", "仓库|仓库名称|所在仓库"),
+        ),
+        ("库存变动日期（北京时间）", date_for_cell),
+        (
+            "期初库存",
+            _pipe_keys("WINIT_INOUT_SHELF_QTY_BEGIN_KEYS", "期初库存|期初数量"),
+        ),
+        (
+            "期末库存",
+            _pipe_keys("WINIT_INOUT_SHELF_QTY_END_KEYS", "期末库存|期末数量"),
+        ),
+        (
+            "单据号",
+            _pipe_keys("WINIT_INOUT_SHELF_DOC_KEYS", "单据号|单号|业务单号|流水号"),
+        ),
+    ]
 
 
 def _matrix_day_cap() -> int:
@@ -191,23 +229,62 @@ class InoutShelfRow:
     raw: dict
 
 
-def _html_tr_for_inout_row(row: InoutShelfRow, detail_cols: List[str]) -> str:
-    """单行 <tr>，不含账号列（由分组标题展示）。"""
+_DETAIL_NUM_LABELS = frozenset({"数量", "期初库存", "期末库存"})
+_DETAIL_SKU_LABEL = "商品编码"
+
+
+def _html_td_numeric(v: Any) -> str:
+    if v is None or v == "":
+        return "<td></td>"
+    if isinstance(v, bool):
+        return f"<td>{html.escape(str(v))}</td>"
+    if isinstance(v, (int, float)):
+        fv = float(v)
+        if abs(fv - round(fv)) < 1e-9:
+            return f'<td class="num inout-em">{html.escape(cell_int_str(int(round(fv))))}</td>'
+        return f'<td class="num inout-em">{html.escape(f"{fv:g}")}</td>'
+    return _html_td_plain(v)
+
+
+def _html_td_plain(v: Any) -> str:
+    if v is None or v == "":
+        return "<td></td>"
+    if isinstance(v, bool):
+        return f"<td>{html.escape(str(v))}</td>"
+    s = str(v).strip()
+    return f"<td>{html.escape(s[:2000])}</td>"
+
+
+def _html_td_sku(v: Any) -> str:
+    if v is None or v == "":
+        return '<td class="cell-sku"></td>'
+    text = str(v).strip()
+    if not text:
+        return '<td class="cell-sku"></td>'
+    attr = html.escape(text, quote=True)
+    disp = html.escape(text)
+    return (
+        f'<td class="cell-sku">'
+        f'<button type="button" class="sku-copy" data-sku="{attr}" '
+        f'title="点击复制商品编码">{disp}</button>'
+        f"</td>"
+    )
+
+
+def _html_tr_detail_row(
+    row: InoutShelfRow,
+    detail_def: List[Tuple[str, List[str]]],
+) -> str:
+    """单行明细 <tr>：列顺序由 detail_def 决定。"""
     tds: List[str] = []
-    for c in detail_cols:
-        v = row.raw.get(c)
-        if v is None or v == "":
-            tds.append("<td></td>")
-        elif isinstance(v, bool):
-            tds.append(f"<td>{html.escape(str(v))}</td>")
-        elif isinstance(v, (int, float)):
-            fv = float(v)
-            if abs(fv - round(fv)) < 1e-9:
-                tds.append(f'<td class="num">{html.escape(cell_int_str(int(round(fv))))}</td>')
-            else:
-                tds.append(f'<td class="num">{html.escape(f"{fv:g}")}</td>')
+    for label, keys in detail_def:
+        _, v = _pick_first_key(row.raw, keys)
+        if label == _DETAIL_SKU_LABEL:
+            tds.append(_html_td_sku(v))
+        elif label in _DETAIL_NUM_LABELS:
+            tds.append(_html_td_numeric(v))
         else:
-            tds.append(f"<td>{html.escape(str(v)[:2000])}</td>")
+            tds.append(_html_td_plain(v))
     return "<tr>" + "".join(tds) + "</tr>"
 
 
@@ -231,7 +308,6 @@ def collect_inout_shelf_rows(
     )
 
     by_date: DefaultDict[str, List[InoutShelfRow]] = defaultdict(list)
-    all_keys: set[str] = set()
 
     for r in cur.fetchall():
         try:
@@ -267,29 +343,13 @@ def collect_inout_shelf_rows(
                 raw=d,
             )
         )
-        all_keys.update(str(k) for k in d.keys())
 
     ordered_dates = _sort_date_blocks(list(by_date.keys()))
     blocks = [(dt, by_date[dt]) for dt in ordered_dates]
 
-    hidden_cols = _hidden_column_strips()
-    column_order: List[str] = ["账号"]
-    for cand in qty_keys:
-        if cand in all_keys and cand not in column_order:
-            column_order.append(cand)
-            break
-    for cand in remark_keys:
-        if cand in all_keys and cand not in column_order:
-            column_order.append(cand)
-            break
-    for cand in date_keys:
-        if cand in all_keys and cand not in column_order:
-            column_order.append(cand)
-            break
-    for k in sorted(all_keys):
-        if k not in column_order:
-            column_order.append(k)
-    column_order = [c for c in column_order if _column_visible(c, hidden_cols)]
+    detail_defs = _detail_column_definitions(qty_keys, date_keys)
+    detail_spec: List[List[Any]] = [[lbl, keys] for lbl, keys in detail_defs]
+    column_order = [lbl for lbl, _ in detail_defs]
 
     total = sum(len(rows) for _, rows in blocks)
     matrix_dates = [d for d in ordered_dates if d != "__未知__"][: _matrix_day_cap()]
@@ -352,6 +412,7 @@ def collect_inout_shelf_rows(
         "total": total,
         "db_path": str(inout_sqlite_path()),
         "column_order": column_order,
+        "detail_spec": detail_spec,
         "remark_keys": remark_keys,
         "qty_keys": qty_keys,
         "date_keys": date_keys,
@@ -430,7 +491,10 @@ def render_inout_shelf_report_html(
     note_e = html.escape(query_note) if query_note else ""
     db_e = html.escape(str(meta.get("db_path", "")))
     total = int(meta.get("total", 0))
-    cols: List[str] = list(meta.get("column_order") or ["账号"])
+    raw_spec = meta.get("detail_spec") or []
+    detail_def: List[Tuple[str, List[str]]] = [
+        (str(row[0]), list(row[1])) for row in raw_spec
+    ]
     cap = int(meta.get("matrix_day_cap") or _matrix_day_cap())
     n_acct = int(meta.get("n_accounts") or 0)
     n_ddays = int(meta.get("n_distinct_dates") or 0)
@@ -443,9 +507,9 @@ def render_inout_shelf_report_html(
     summaries: List[dict] = list(meta.get("account_summaries") or [])
 
     pills = (
-        f'<div class="stat-pills" role="list">'
+        f'<div class="stat-pills inout-meta-line" role="list">'
         f'<span class="stat-pill" role="listitem">{html.escape(str(n_acct))} 个账号</span>'
-        f'<span class="stat-pill blue" role="listitem">{html.escape(str(n_ddays))} 个业务日</span>'
+        f'<span class="stat-pill" role="listitem">{html.escape(str(n_ddays))} 个业务日</span>'
         f'<span class="stat-pill" role="listitem">{html.escape(cell_int_str(total))} 条明细</span>'
         f"</div>"
     )
@@ -580,8 +644,13 @@ def render_inout_shelf_report_html(
 """
 
     matrix_acct_ids: List[int] = [a for a, _ in matrix_accounts]
-    detail_cols = [c for c in cols if c != "账号"]
-    thead_detail = "".join(f"<th>{html.escape(c)}</th>" for c in detail_cols)
+    th_parts: List[str] = []
+    for lbl, _keys in detail_def:
+        th_cls = "inout-th"
+        if lbl in _DETAIL_NUM_LABELS:
+            th_cls += " inout-th-num"
+        th_parts.append(f'<th scope="col" class="{th_cls}">{html.escape(lbl)}</th>')
+    thead_detail = "".join(th_parts)
 
     sections = ""
     for date_label, rows in blocks:
@@ -621,23 +690,15 @@ def render_inout_shelf_report_html(
                 sub_sum_s = cell_int_str(int(round(sub_qty)))
             else:
                 sub_sum_s = html.escape(f"{sub_qty:g}")
-            if not detail_cols:
-                tbody_body = (
-                    "<tr><td colspan=\"1\">无列可展示（可在 .env 调整 "
-                    "<code>WINIT_INOUT_SHELF_HIDDEN_COLUMNS</code>）</td></tr>"
-                )
-            else:
-                tbody_body = "".join(
-                    _html_tr_for_inout_row(r, detail_cols) for r in acct_rows
-                )
+            tbody_body = "".join(_html_tr_detail_row(r, detail_def) for r in acct_rows)
             sub_chunks += f"""
   <div class="ios-acct-block">
     <h3 class="ios-acct-head">{tag_e}
-      <span class="ios-acct-meta"> {len(acct_rows)} 行 · 数量合计 <span class="num">{sub_sum_s}</span></span>
+      <span class="ios-acct-meta"> {len(acct_rows)} 行 · 数量合计 <span class="num inout-em">{sub_sum_s}</span></span>
     </h3>
     <div style="overflow-x:auto">
-    <table class="data">
-      <thead><tr>{thead_detail or "<th>（无列）</th>"}</tr></thead>
+    <table class="data inout-detail">
+      <thead><tr>{thead_detail}</tr></thead>
       <tbody>{tbody_body}</tbody>
     </table>
     </div>
@@ -669,7 +730,7 @@ def render_inout_shelf_report_html(
         )
 
     detail_title = (
-        '<h2 class="section-title" id="ios-detail">按业务日期 · 明细（日内按账号分表）</h2>'
+        '<h2 class="section-title" id="ios-detail">按业务日期 · 明细（日内按账号；表内仅 7 列）</h2>'
         if total > 0
         else ""
     )
@@ -709,26 +770,43 @@ def render_inout_shelf_report_html(
       color: var(--muted);
     }
     .banner .stat-pills { margin-top: 0.75rem; }
+    .inout-meta-line .stat-pill { background: #f1f5f9; color: #334155; border: 1px solid var(--border); }
+    .inout-em { color: #0f172a !important; font-weight: 800 !important; }
     .summary-by-acct .ok { color: var(--accent-dark); font-weight: 700; }
     .summary-by-acct .warn { color: #b45309; font-weight: 700; }
+    .inout-detail { font-size: 13px; }
+    .inout-detail thead th.inout-th { font-weight: 700; color: #334155; background: #f8fafc; }
+    .inout-detail thead th.inout-th-num { text-align: right; }
+    .inout-detail tbody td { vertical-align: middle; }
+    .inout-detail .cell-sku { white-space: nowrap; max-width: 14rem; }
+    .sku-copy {
+      all: unset; cursor: pointer;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12.5px; font-weight: 700; color: #0f172a;
+      border-bottom: 1px dashed #94a3b8; padding: 0.1rem 0;
+      display: inline-block; max-width: 100%; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom;
+    }
+    .sku-copy:hover { border-bottom-style: solid; border-bottom-color: var(--accent-dark); color: var(--accent-dark); }
+    .sku-copy.is-copied { border-bottom-color: var(--accent); color: var(--accent-dark); }
     .cov-matrix { font-size: 12px; }
     .cov-matrix th.corner, .cov-matrix th.cov-date-h { white-space: nowrap; }
     .cov-matrix th.cov-acct-h {
       max-width: 7.5rem; font-weight: 600; font-size: 11px;
-      line-height: 1.25; vertical-align: bottom;
+      line-height: 1.25; vertical-align: bottom; color: #475569;
     }
     .cov-matrix td.cov-cell { text-align: center; vertical-align: middle; padding: 6px 5px; }
-    .cov-matrix td.cov-yes { background: #ecfdf5; }
-    .cov-matrix td.cov-no { background: #f8fafc; color: var(--muted); }
+    .cov-matrix td.cov-yes { background: #fff; box-shadow: inset 0 0 0 1px #e2e8f0; }
+    .cov-matrix td.cov-no { background: #fafafa; color: #94a3b8; }
     .cov-matrix .cov-link {
-      font-weight: 700; color: var(--accent-dark); text-decoration: none;
+      font-weight: 800; color: #0f172a; text-decoration: none;
       font-variant-numeric: tabular-nums;
     }
-    .cov-matrix .cov-link:hover { text-decoration: underline; color: #115e59; }
-    .cov-matrix .cov-sub { font-weight: 600; font-size: 11px; color: #0f766e; }
-    .cov-matrix .cov-date-link { font-weight: 700; color: #fff; text-decoration: none; }
+    .cov-matrix .cov-link:hover { text-decoration: underline; color: var(--accent-dark); }
+    .cov-matrix .cov-sub { font-weight: 600; font-size: 11px; color: var(--muted); }
+    .cov-matrix th.cov-date-h { background: #1e293b; color: #f8fafc; font-weight: 700; }
+    .cov-matrix .cov-date-link { font-weight: 700; color: #f8fafc; text-decoration: none; }
     .cov-matrix .cov-date-link:hover { text-decoration: underline; }
-    .cov-matrix th.cov-date-h { background: #0f766e; color: #fff; }
     """
 
     return f"""<!DOCTYPE html>
@@ -748,7 +826,7 @@ def render_inout_shelf_report_html(
   </div>
   <header class="banner" style="padding:1rem 1.25rem">
     <h1 style="font-size:1.35rem">各账号上架流水核对</h1>
-    <p class="sub">对照万邑通导出中备注为「标准入库-上架」「国内直发入库-上架」的流水，看清<strong>每个账号</strong>在近期业务日上是否<strong>持续有上架记录</strong>；可先扫汇总与矩阵，再点日期下钻：<strong>该日 → 按账号分表 → 表内按数量从高到低</strong>。</p>
+    <p class="sub">对照万邑通导出中备注为「标准入库-上架」「国内直发入库-上架」的流水，看清<strong>每个账号</strong>在近期业务日上是否<strong>持续有上架记录</strong>；可先扫汇总与矩阵，再点日期下钻：<strong>该日 → 按账号分表 → 表内按数量从高到低</strong>。明细表<strong>仅保留 7 列</strong>（商品编码、数量、仓库、库存变动日期（北京时间）、期初/期末库存、单据号）；<strong>商品编码可点击复制</strong>。</p>
     {pills}
     {f'<p class="muted" style="margin:0.75rem 0 0 0;opacity:0.9">{note_e}</p>' if note_e else ""}
     <p class="muted" style="margin:0.75rem 0 0 0;opacity:0.88;font-size:0.82rem">
@@ -761,5 +839,43 @@ def render_inout_shelf_report_html(
   {detail_title}
   {sections if total else empty}
 </div>
+<script>
+(function () {{
+  function copyText(t) {{
+    if (navigator.clipboard && navigator.clipboard.writeText) {{
+      return navigator.clipboard.writeText(t);
+    }}
+    return new Promise(function (resolve, reject) {{
+      try {{
+        var ta = document.createElement('textarea');
+        ta.value = t;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        resolve();
+      }} catch (e) {{ reject(e); }}
+    }});
+  }}
+  document.querySelectorAll('.sku-copy').forEach(function (btn) {{
+    btn.addEventListener('click', function () {{
+      var s = btn.getAttribute('data-sku') || '';
+      if (!s) return;
+      var old = btn.textContent;
+      copyText(s).then(function () {{
+        btn.classList.add('is-copied');
+        btn.textContent = '已复制';
+        setTimeout(function () {{
+          btn.classList.remove('is-copied');
+          btn.textContent = old;
+        }}, 1100);
+      }}).catch(function () {{}});
+    }});
+  }});
+}})();
+</script>
 </body>
 </html>"""

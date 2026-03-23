@@ -19,7 +19,7 @@
 | 5 点 inventoryFlow 下载入库 | `run_inventory_inout_job.py` | 按账号导出并下载名含 `InventoryInoutSeller` 的最新文件；解压表格入独立库（按账号覆盖） |
 | 入库完成飞书 | `winit_feishu_webhook.py` → `channel="sync"` | `WINIT_FEISHU_WEBHOOK_SYNC` 或兼容 `WINIT_FEISHU_WEBHOOK_URL` |
 | 只读库存网站（首页 8765） | `inventory_viewer.py` | `/`、`/table`、`/runs`、`/report/no-sales`、`/report/inout-shelf`；`WINIT_VIEWER_*`、`WINIT_PUBLIC_BASE_URL` |
-| 入库上架类流水（inout 库） | `winit_inout_shelf_report.py` | 两类备注筛选；按业务日期分块、块内按数量降序；列名可用 `WINIT_INOUT_SHELF_*_KEYS` |
+| 入库上架类流水（inout 库） | `winit_inout_shelf_report.py` | 两类备注筛选；按业务日期分块、日内按账号分表；**明细固定 7 列**（商品编码可点击复制）；导出表头不一致时用 `WINIT_INOUT_SHELF_SKU_KEYS` 等补候选键 |
 | 入库上架飞书摘要 10:10 | `run_inout_shelf_morning_job.py` | `channel="inout_shelf"` → `WINIT_FEISHU_WEBHOOK_INOUT_SHELF`；未配 Webhook 则跳过（退出 0） |
 | 无动销统计与飞书 | `winit_no_sales_report.py`、`run_no_sales_morning_job.py` | `channel="no_sales"` → **`WINIT_FEISHU_WEBHOOK_NO_SALES`（必填，不与 sync 混用）** |
 | 无动销规则 | `winit_no_sales_report.py`、README「无动销预警」 | 单仓可用≠0 参与 SKU 聚合；仅「聚合后 7 天均销=0」分 ①②③；飞书报 SKU 数；详情 Tab + 分仓行 |
@@ -88,7 +88,14 @@
    sudo systemctl daemon-reload
    sudo systemctl enable --now winit-no-sales-alert.timer
    ```
-5. **只读站点常驻**（示例端口 8765）：
+5. **每日 10:10 入库上架摘要飞书**（北京时间）：
+   ```bash
+   sudo cp /opt/winit-analytics/deploy/winit-inout-shelf-alert.service.example /etc/systemd/system/winit-inout-shelf-alert.service
+   sudo cp /opt/winit-analytics/deploy/winit-inout-shelf-alert.timer.example /etc/systemd/system/winit-inout-shelf-alert.timer
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now winit-inout-shelf-alert.timer
+   ```
+6. **只读站点常驻**（示例端口 8765）：
    ```bash
    sudo cp /opt/winit-analytics/deploy/inventory-viewer.service.example /etc/systemd/system/inventory-viewer.service
    # 编辑其中 WorkingDirectory / User / EnvironmentFile 若需要
@@ -122,13 +129,30 @@ sudo systemctl restart inventory-viewer   # 若改了 viewer 代码
 - [ ] `timedatectl` 为 `Asia/Shanghai`
 - [ ] `systemctl status inventory-viewer` 为 active；浏览器打开 `http://<公网IP>:8765/`（及 Basic）
 - [ ] 打开 `/report/no-sales`：分账号、数字为整数、样式正常
-- [ ] `systemctl list-timers` 中 `winit-daily-sync`、`winit-no-sales-alert` 有 **NEXT** 时间合理
+- [ ] 打开 `/report/inout-shelf`：按业务日分块，块内按账号分表，表内按数量降序；**明细表固定 7 列**（商品编码可点击复制）
+- [ ] `systemctl list-timers` 中 `winit-daily-sync`、`winit-inout-sync`、`winit-no-sales-alert`、`winit-inout-shelf-alert` 的 **NEXT** 时间合理
 - [ ] 手动跑一次入库：`cd /opt/winit-analytics && source .venv/bin/activate && python run_daily_winit_job.py`（或等定时）；看飞书 sync 与 `journalctl -u winit-daily-sync.service -n 80`
+- [ ] 手动跑一次 inout：`python run_inventory_inout_job.py`；看 `journalctl -u winit-inout-sync.service -n 120`，并确认飞书 `inout_shelf` 收到“账号上架数据已更新，请速速查看”
 - [ ] 手动无动销：`python test_no_sales_feishu.py` 或 `python run_no_sales_morning_job.py`；飞书 no_sales 群收到消息，**详情链接可点开**（`WINIT_PUBLIC_BASE_URL` 正确）
 
 ---
 
-## 7. 相关文档
+## 7. 新增需求互不干扰（准入清单）
+
+后续若继续在本服务新增需求，必须逐条满足：
+
+- [ ] **入口隔离**：新需求使用独立入口 URL（不得改老链路默认入口）。
+- [ ] **任务隔离**：新增独立 `run_xxx_job.py`（不要把不同业务混进同一入口脚本）。
+- [ ] **存储隔离**：使用独立 DB 路径或独立表命名空间（如 `WINIT_XXX_SQLITE_PATH`）。
+- [ ] **通知隔离**：飞书使用独立 `channel` 与 `WINIT_FEISHU_WEBHOOK_<CHANNEL>`。
+- [ ] **定时隔离**：新增独立 `service/timer`，触发时间与依赖关系写清楚。
+- [ ] **页面隔离**：报表用独立路由 `/report/<name>`，不破坏既有页面语义。
+- [ ] **文档隔离**：同步更新 `README.md`、`OPERATIONS.md`、`.env.example`。
+- [ ] **回归验证**：至少回归一次老链路 `run_daily_winit_job.py` + `/report/no-sales`。
+
+---
+
+## 8. 相关文档
 
 | 文档 | 内容 |
 |------|------|
