@@ -288,6 +288,105 @@ def _html_tr_detail_row(
     return "<tr>" + "".join(tds) + "</tr>"
 
 
+def _collect_unique_texts(vals: List[Any]) -> List[str]:
+    out: List[str] = []
+    seen: set[str] = set()
+    for v in vals:
+        if v is None:
+            continue
+        s = str(v).strip()
+        if not s or s in seen:
+            continue
+        seen.add(s)
+        out.append(s)
+    return out
+
+
+def _join_preview(items: List[str], *, max_items: int = 3, sep: str = "、") -> str:
+    if not items:
+        return ""
+    if len(items) <= max_items:
+        return sep.join(items)
+    return sep.join(items[:max_items]) + f" 等{len(items)}项"
+
+
+def _build_detail_key_map(detail_def: List[Tuple[str, List[str]]]) -> Dict[str, List[str]]:
+    return {label: keys for label, keys in detail_def}
+
+
+def _detail_val(row: InoutShelfRow, key_map: Dict[str, List[str]], label: str) -> Any:
+    keys = key_map.get(label, [])
+    _, v = _pick_first_key(row.raw, keys)
+    return v
+
+
+def _merge_rows_by_sku(
+    rows: List[InoutShelfRow],
+    detail_def: List[Tuple[str, List[str]]],
+) -> List[InoutShelfRow]:
+    """
+    同账号同日期内按「商品编码」合并，数量求和，其它字段做可读聚合。
+    """
+    if not rows:
+        return []
+    key_map = _build_detail_key_map(detail_def)
+    groups: DefaultDict[str, List[InoutShelfRow]] = defaultdict(list)
+    # 无 SKU 的行保持原子，不与其它行误合并。
+    anon_idx = 0
+    for row in rows:
+        sku_v = _detail_val(row, key_map, _DETAIL_SKU_LABEL)
+        sku = str(sku_v).strip() if sku_v not in (None, "") else ""
+        if not sku:
+            anon_idx += 1
+            sku = f"__NO_SKU__#{anon_idx}"
+        groups[sku].append(row)
+
+    merged: List[InoutShelfRow] = []
+    for _, grp in groups.items():
+        if len(grp) == 1:
+            merged.append(grp[0])
+            continue
+        base = grp[0]
+        qty_sum = sum(r.qty for r in grp)
+
+        sku = str(_detail_val(base, key_map, _DETAIL_SKU_LABEL) or "").strip()
+        whs = _collect_unique_texts([_detail_val(r, key_map, "仓库") for r in grp])
+        docs = _collect_unique_texts([_detail_val(r, key_map, "单据号") for r in grp])
+        dts = _collect_unique_texts([_detail_val(r, key_map, "库存变动日期（北京时间）") for r in grp])
+
+        begin_vals = [_coerce_qty(_detail_val(r, key_map, "期初库存")) for r in grp]
+        end_vals = [_coerce_qty(_detail_val(r, key_map, "期末库存")) for r in grp]
+        begin_min = min(begin_vals) if begin_vals else 0.0
+        end_max = max(end_vals) if end_vals else 0.0
+
+        dt_merged = ""
+        if dts:
+            dt_sorted = sorted(dts)
+            dt_merged = dt_sorted[0] if len(dt_sorted) == 1 else f"{dt_sorted[0]} ~ {dt_sorted[-1]}"
+
+        raw_merged = {
+            "商品编码": sku,
+            "数量": qty_sum,
+            "仓库": _join_preview(whs, max_items=3, sep=" / "),
+            "库存变动日期（北京时间）": dt_merged,
+            "期初库存": begin_min,
+            "期末库存": end_max,
+            "单据号": _join_preview(docs, max_items=3, sep="、"),
+        }
+        merged.append(
+            InoutShelfRow(
+                account_id=base.account_id,
+                account_username=base.account_username,
+                account_tag=base.account_tag,
+                qty=qty_sum,
+                remark=base.remark,
+                date_bucket=base.date_bucket,
+                raw=raw_merged,
+            )
+        )
+    return merged
+
+
 def collect_inout_shelf_rows(
     conn: sqlite3.Connection,
 ) -> Tuple[List[Tuple[str, List[InoutShelfRow]]], dict]:
@@ -683,18 +782,24 @@ def render_inout_shelf_report_html(
         sub_chunks = ""
         for aid in acct_order:
             acct_rows = by_acct[aid]
-            acct_rows.sort(key=lambda x: (-x.qty, x.remark, x.account_username))
+            merged_rows = _merge_rows_by_sku(acct_rows, detail_def)
+            merged_rows.sort(key=lambda x: (-x.qty, x.remark, x.account_username))
             tag_e = html.escape(acct_rows[0].account_tag)
             sub_qty = sum(x.qty for x in acct_rows)
             if abs(sub_qty - round(sub_qty)) < 1e-9:
                 sub_sum_s = cell_int_str(int(round(sub_qty)))
             else:
                 sub_sum_s = html.escape(f"{sub_qty:g}")
-            tbody_body = "".join(_html_tr_detail_row(r, detail_def) for r in acct_rows)
+            tbody_body = "".join(_html_tr_detail_row(r, detail_def) for r in merged_rows)
+            merge_note = (
+                f"（合并后 {len(merged_rows)} 行 / 原 {len(acct_rows)} 条）"
+                if len(merged_rows) != len(acct_rows)
+                else ""
+            )
             sub_chunks += f"""
   <div class="ios-acct-block">
     <h3 class="ios-acct-head">{tag_e}
-      <span class="ios-acct-meta"> {len(acct_rows)} 行 · 数量合计 <span class="num inout-em">{sub_sum_s}</span></span>
+      <span class="ios-acct-meta"> {len(merged_rows)} 行 {html.escape(merge_note)} · 数量合计 <span class="num inout-em">{sub_sum_s}</span></span>
     </h3>
     <div style="overflow-x:auto">
     <table class="data inout-detail">
