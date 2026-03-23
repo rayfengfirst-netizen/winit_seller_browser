@@ -31,7 +31,7 @@
 - **`run_inventory_inout_job.py`** — **5 点链路**：按账号打开 `Australia/inventoryFlow` 导出，去导出中心下载名含 `InventoryInoutSeller` 的最新文件，解压表格后入**独立 SQLite**（按账号覆盖写入，不保留每日历史）并推飞书
 - `winit_inventory_db.py` / `winit_inventory_ingest.py` — 表结构 `inventory_daily`（按 `snapshot_date` + `account_id` 整批替换）与 `sync_runs` 运行记录
 - `winit_inventory_inout_db.py` — 独立库 `winit_inout.db`（默认）与表 `inventory_inout_current` / `inventory_inout_latest_meta`
-- `winit_inout_shelf_report.py` — 从独立库筛选备注「标准入库-上架」「国内直发入库-上架」，按日期分块、按数量排序；网页 `/report/inout-shelf`
+- `winit_inout_shelf_report.py` — 从独立库筛选备注「标准入库-上架」「国内直发入库-上架」；`/report/inout-shelf`：按业务日分块、日内按账号分表；**明细固定 7 列**，商品编码可点击复制（列别名见 `.env.example`）
 - **`run_inout_shelf_morning_job.py`** — **10:10 飞书摘要**（`WINIT_FEISHU_WEBHOOK_INOUT_SHELF`）；依赖当日已入库的 inout 数据
 - `deploy/winit-daily-sync.service.example` + `winit-daily-sync.timer.example` — systemd **每天本地 06:00** 触发；**请将服务器时区设为 `Asia/Shanghai`** 即北京时间早 6 点入库（见 timer 文件头注释）；完成后飞书「sync」场景通知（`WINIT_FEISHU_WEBHOOK_SYNC` 或兼容 `WINIT_FEISHU_WEBHOOK_URL`，见 `winit_feishu_webhook.py`）
 - `deploy/winit-inout-sync.service.example` + `winit-inout-sync.timer.example` — systemd **每天本地 05:00** 触发 inventoryFlow 导出/下载（北京时间 5 点）

@@ -182,4 +182,35 @@
 
 ---
 
+## 11. 2026-03-23 迭代回顾（inventoryFlow 上架核对）
+
+### 本次完成
+
+- 新增独立 inout 轨道：`run_inventory_inout_job.py` + `winit_inventory_inout_db.py`（默认 `artifacts/winit_inout.db`，按账号覆盖写入）。
+- 新增页面：`/report/inout-shelf`（筛选两类备注；按业务日分块；日内按账号分表；每账号内按数量降序）。
+- 日期解析增强：支持 `库存变动日期 北京时间`（如 `2026-03-19 09:36:54` 自动归为 `2026-03-19`）。
+- 新增飞书任务：`run_inout_shelf_morning_job.py` + `winit-inout-shelf-alert.timer`（10:10）。
+- inout 主任务成功后追加简短提醒：`✅ 账号上架数据已更新，请速速查看。链接：.../report/inout-shelf`。
+
+### 线上验证结果
+
+- 代码已发布到生产并重启 `inventory-viewer`。
+- 手动触发 `winit-inout-sync.service` 成功（多账号下载、入库、日志正常）。
+- 手动触发 `winit-inout-shelf-alert.service` 成功（飞书 `inout_shelf` 已送达）。
+- 补齐线上缺失变量：`WINIT_FEISHU_WEBHOOK_INOUT_SHELF`。
+
+### 运行注意
+
+- 当前可能看到两条推送：详细摘要（sync）+ 简短提醒（inout_shelf）；10:10 还会再发 inout 摘要。
+- 若后续希望“只发一条”，可按运营反馈切换策略（保留简短或保留详细）。
+
+### 明细页定型与文档收工（同日）
+
+- `/report/inout-shelf` 明细表**固定 7 列**（顺序：商品编码、数量、仓库、库存变动日期（北京时间）、期初库存、期末库存、单据号）；**商品编码支持点击复制**；矩阵与顶部统计区配色收敛，重点突出数量与 SKU。
+- 导出表头与默认列名不一致时，用 `.env` 中 `WINIT_INOUT_SHELF_SKU_KEYS` / `WH_KEYS` / `QTY_BEGIN_KEYS` / `QTY_END_KEYS` / `DOC_KEYS` 追加候选键（见 `.env.example`）。
+- 对应实现与部署：`996bc1b`（已合并 `main`，生产 `inventory-viewer` 已 `git pull` + `restart`）。
+- 运维侧：`OPERATIONS.md` 已含 **「新增需求互不干扰（准入清单）」**、inout 相关 timer 与线上测试项，便于后续扩展不串线。
+
+---
+
 *本文档随项目演进可继续增补；与代码不一致时以代码与 `.env.example` 为准。*
