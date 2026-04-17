@@ -21,17 +21,19 @@
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import html
 import json
 import os
+import secrets
 import sqlite3
 from pathlib import Path
 
 from collections import defaultdict
 
 from dotenv import load_dotenv
-from flask import Flask, abort, request, Response
+from flask import Flask, abort, redirect, request, Response, session, url_for
 
 ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env")
@@ -51,31 +53,119 @@ from winit_no_sales_report import (  # noqa: E402
 )
 
 app = Flask(__name__)
+app.secret_key = os.environ.get(
+    "WINIT_SECRET_KEY",
+    hashlib.sha256(b"winit-inventory-viewer-default-key").hexdigest(),
+)
+app.permanent_session_lifetime = 60 * 60 * 24 * 7  # 7 days
 
 _VIEWER_USER = os.environ.get("WINIT_VIEWER_USER", "").strip()
 _VIEWER_PASSWORD = os.environ.get("WINIT_VIEWER_PASSWORD", "")
 
 PAGE_SIZE = 80
 
+_LOGIN_OPEN_PATHS = frozenset({"/login"})
+
 
 @app.before_request
-def _require_basic_auth_if_configured() -> Response | None:
+def _require_login() -> Response | None:
     if not _VIEWER_USER:
         return None
-    auth = request.authorization
-    ok_user = auth is not None and auth.username == _VIEWER_USER
-    ok_pass = auth is not None and hmac.compare_digest(
-        auth.password or "",
-        _VIEWER_PASSWORD or "",
-    )
-    if ok_user and ok_pass:
+    if request.path in _LOGIN_OPEN_PATHS:
         return None
-    return Response(
-        "需要登录（HTTP Basic）",
-        401,
-        {"WWW-Authenticate": 'Basic realm="Winit inventory"'},
-        mimetype="text/plain; charset=utf-8",
-    )
+    if session.get("authed"):
+        return None
+    return redirect(url_for("login", next=request.full_path))
+
+
+_LOGIN_PAGE_CSS = """
+.login-wrapper {
+  display: flex; justify-content: center; align-items: center;
+  min-height: 100vh; padding: 1rem;
+}
+.login-card {
+  background: var(--surface); border-radius: var(--radius);
+  border: 1px solid var(--border); box-shadow: var(--shadow);
+  padding: 2.5rem 2rem; width: 100%; max-width: 380px;
+}
+.login-card h1 {
+  font-size: 1.35rem; margin: 0 0 0.25rem; color: var(--accent-dark);
+}
+.login-card .sub { color: var(--muted); font-size: 0.88rem; margin: 0 0 1.5rem; }
+.login-card label {
+  display: block; font-size: 0.82rem; font-weight: 600;
+  color: #475569; margin-bottom: 0.3rem;
+}
+.login-card input[type="text"],
+.login-card input[type="password"] {
+  width: 100%; box-sizing: border-box;
+  padding: 0.55rem 0.75rem; border: 1px solid var(--border);
+  border-radius: 8px; font-size: 0.95rem; margin-bottom: 1rem;
+  outline: none; transition: border-color 0.15s;
+}
+.login-card input:focus { border-color: var(--accent); }
+.login-card button {
+  width: 100%; padding: 0.6rem; border: none; border-radius: 8px;
+  background: linear-gradient(135deg, var(--accent-dark), #0e7490);
+  color: #fff; font-size: 1rem; font-weight: 600; cursor: pointer;
+  transition: opacity 0.15s;
+}
+.login-card button:hover { opacity: 0.9; }
+.login-err {
+  background: #fef2f2; color: #991b1b; border: 1px solid #fecaca;
+  border-radius: 8px; padding: 0.5rem 0.75rem; font-size: 0.88rem;
+  margin-bottom: 1rem;
+}
+"""
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    error = ""
+    if request.method == "POST":
+        u = request.form.get("username", "")
+        p = request.form.get("password", "")
+        ok_user = hmac.compare_digest(u, _VIEWER_USER)
+        ok_pass = hmac.compare_digest(p, _VIEWER_PASSWORD)
+        if ok_user and ok_pass:
+            session.permanent = True
+            session["authed"] = True
+            dest = request.args.get("next") or "/"
+            return redirect(dest)
+        error = "用户名或密码错误"
+
+    err_html = f'<div class="login-err">{html.escape(error)}</div>' if error else ""
+    return f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>登录 · Winit 库存</title>
+  <style>{VIEWER_THEME_CSS}{_LOGIN_PAGE_CSS}</style>
+</head>
+<body>
+<div class="login-wrapper">
+  <div class="login-card">
+    <h1>Winit 库存系统</h1>
+    <p class="sub">请登录后查看数据</p>
+    {err_html}
+    <form method="post">
+      <label for="username">用户名</label>
+      <input id="username" name="username" type="text" autocomplete="username" autofocus required/>
+      <label for="password">密码</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required/>
+      <button type="submit">登 录</button>
+    </form>
+  </div>
+</div>
+</body>
+</html>"""
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
 
 
 def _conn() -> sqlite3.Connection:
@@ -157,6 +247,7 @@ def index() -> str:
     <a href="/report/no-sales" class="primary">无动销预警</a>
     <a href="/report/inout-shelf">各账号上架核对</a>
     <a href="/runs">同步运行记录</a>
+    {"<a href='/logout' style='margin-left:auto;color:var(--muted);font-weight:400'>退出登录</a>" if _VIEWER_USER else ""}
   </div>
   <p class="muted">数据库文件 <code>{db}</code></p>
   <h2 class="section-title">按账号 · 快照汇总</h2>
